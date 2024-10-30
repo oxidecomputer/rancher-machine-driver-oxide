@@ -1,4 +1,48 @@
-# Oxide Rancher Machine Driver
+# Rancher Node Driver for Oxide
 
-This repository contains the Rancher Node Driver for provisioning hosts on Oxide
-that can be used by Rancher to deploy Kubernetes clusters.
+This is a driver implementation of https://github.com/rancher/machine for Oxide.
+
+## Build
+
+```shell
+make build
+```
+
+## Deployment
+
+The built binary needs to be hosted somewhere that the rancher management cluster can download it.
+
+oxide-driver.yaml:
+```yaml
+apiVersion: management.cattle.io/v3
+kind: NodeDriver
+metadata:
+  name: oxide
+  annotations:
+    privateCredentialFields: token
+    publicCredentialFields: host,project
+  finalizers:
+    - controller.cattle.io/node-driver-controller
+spec:
+  active: true
+  addCloudCredential: true
+  builtin: false
+  checksum: "<sha256 checksum of the binary>"
+  description: ""
+  displayName: oxide
+  externalId: ""
+  uiUrl: ""
+  url: https://somewhere/rancher/is/able/to/download/docker-machine-driver-oxide
+```
+
+```shell
+kubectl apply -f oxide-driver.yaml
+```
+
+## UI
+
+The default UI was sufficient for initial testing.
+
+This was not used in the initial implementation but can be fleshed out at a later point.
+
+https://github.com/rancher/ui-driver-skel
