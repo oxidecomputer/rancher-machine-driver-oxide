@@ -1,4 +1,13 @@
-package oxide
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+// Copyright 2024 Oxide Computer Company
+
+// Package oxide contains the Oxide Rancher machine driver, also known as a
+// node driver in Rancher parlance. Rancher uses this machine driver to
+// provision instances on Oxide and install Kubernetes on those instances.
+package main
 
 import (
 	"testing"
