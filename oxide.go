@@ -33,18 +33,18 @@ const (
 )
 
 const (
-	flagHost                      = "host"
-	flagToken                     = "token"
-	flagProject                   = "project"
-	flagVCPUs                     = "vcpus"
-	flagMemory                    = "memory"
-	flagBootDiskSize              = "boot-disk-size"
-	flagBootDiskImageID           = "boot-disk-image-id"
-	flagVPC                       = "vpc"
-	flagSubnet                    = "subnet"
-	flagUserDataFile              = "user-data-file"
-	flagSSHUser                   = "ssh-user"
-	flagAdditionalSSHPublicKeyIDs = "additional-ssh-public-key-ids"
+	flagHost                      = "oxide-host"
+	flagToken                     = "oxide-token"
+	flagProject                   = "oxide-project"
+	flagVCPUs                     = "oxide-vcpus"
+	flagMemory                    = "oxide-memory"
+	flagBootDiskSize              = "oxide-boot-disk-size"
+	flagBootDiskImageID           = "oxide-boot-disk-image-id"
+	flagVPC                       = "oxide-vpc"
+	flagSubnet                    = "oxide-subnet"
+	flagUserDataFile              = "oxide-user-data-file"
+	flagSSHUser                   = "oxide-ssh-user"
+	flagAdditionalSSHPublicKeyIDs = "oxide-additional-ssh-public-key-ids"
 )
 
 // make sure Driver implements the drivers.Driver interface.
