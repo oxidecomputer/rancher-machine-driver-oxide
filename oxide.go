@@ -209,9 +209,10 @@ func (d *Driver) Create() error {
 		return err
 	}
 
-	if len(networkInterfaces) > 1 {
-		d.IPAddress = networkInterfaces[0].Ip
+	if len(networkInterfaces) == 0 {
+		return errors.New("no valid network interfaces found")
 	}
+	d.IPAddress = networkInterfaces[0].Ip
 
 	return nil
 }
