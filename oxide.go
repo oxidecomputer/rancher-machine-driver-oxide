@@ -3,10 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 // Copyright 2024 Oxide Computer Company
-
-// Package oxide contains the Oxide Rancher machine driver, also known as a
-// node driver in Rancher parlance. Rancher uses this machine driver to
-// provision instances on Oxide and install Kubernetes on those instances.
 package main
 
 import (
@@ -464,20 +460,21 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 	d.AdditionalSSHPublicKeyIDs = opts.StringSlice(flagAdditionalSSHPublicKeyIDs)
 	d.SSHPort = defaultSSHPort
 
+	var err error
 	if d.Host == "" {
-		return errors.New("required option not set: " + flagHost)
+		err = errors.Join(err, fmt.Errorf("required option not set: %s", flagHost))
 	}
 
 	if d.Token == "" {
-		return errors.New("required option not set: " + flagToken)
+		err = errors.Join(err, fmt.Errorf("required option not set: %s", flagToken))
 	}
 
 	if d.Project == "" {
-		return errors.New("required option not set: " + flagProject)
+		err = errors.Join(err, fmt.Errorf("required option not set: %s", flagProject))
 	}
 
 	if d.BootDiskImageID == "" {
-		return errors.New("required option not set: " + flagBootDiskImageID)
+		return errors.Join(err, fmt.Errorf("required option not set: %s", flagBootDiskImageID))
 	}
 
 	return nil

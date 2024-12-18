@@ -3,10 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 // Copyright 2024 Oxide Computer Company
-
-// Package oxide contains the Oxide Rancher machine driver, also known as a
-// node driver in Rancher parlance. Rancher uses this machine driver to
-// provision instances on Oxide and install Kubernetes on those instances.
 package main
 
 import (
