@@ -481,11 +481,7 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 		errRequiredFlag = errors.Join(errRequiredFlag, errors.New(errRequiredOptionNotSet+flagBootDiskImageID))
 	}
 
-	if errRequiredFlag != nil {
-		return errRequiredFlag
-	}
-
-	return nil
+	return errRequiredFlag
 }
 
 // Start starts the instance.
