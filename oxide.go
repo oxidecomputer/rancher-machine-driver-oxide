@@ -43,6 +43,8 @@ const (
 	flagAdditionalSSHPublicKeyIDs = "oxide-additional-ssh-public-key-ids"
 )
 
+const errRequiredOptionNotSet = "required option not set: "
+
 // make sure Driver implements the drivers.Driver interface.
 var _ drivers.Driver = &Driver{}
 
@@ -463,19 +465,19 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 
 	var err error
 	if d.Host == "" {
-		err = errors.Join(err, errors.New("required option not set: "+flagHost))
+		err = errors.Join(err, errors.New(errRequiredOptionNotSet+flagHost))
 	}
 
 	if d.Token == "" {
-		err = errors.Join(err, errors.New("required option not set: "+flagToken))
+		err = errors.Join(err, errors.New(errRequiredOptionNotSet+flagToken))
 	}
 
 	if d.Project == "" {
-		err = errors.Join(err, errors.New("required option not set: "+flagProject))
+		err = errors.Join(err, errors.New(errRequiredOptionNotSet+flagProject))
 	}
 
 	if d.BootDiskImageID == "" {
-		return errors.Join(err, errors.New("required option not set: "+flagBootDiskImageID))
+		return errors.Join(err, errors.New(errRequiredOptionNotSet+flagBootDiskImageID))
 	}
 
 	return nil
