@@ -463,19 +463,19 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 
 	var err error
 	if d.Host == "" {
-		err = errors.Join(err, fmt.Errorf("required option not set: %s", flagHost))
+		err = errors.Join(err, errors.New("required option not set: "+flagHost))
 	}
 
 	if d.Token == "" {
-		err = errors.Join(err, fmt.Errorf("required option not set: %s", flagToken))
+		err = errors.Join(err, errors.New("required option not set: "+flagToken))
 	}
 
 	if d.Project == "" {
-		err = errors.Join(err, fmt.Errorf("required option not set: %s", flagProject))
+		err = errors.Join(err, errors.New("required option not set: "+flagProject))
 	}
 
 	if d.BootDiskImageID == "" {
-		return errors.Join(err, fmt.Errorf("required option not set: %s", flagBootDiskImageID))
+		return errors.Join(err, errors.New("required option not set: "+flagBootDiskImageID))
 	}
 
 	return nil
