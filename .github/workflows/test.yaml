@@ -1,0 +1,22 @@
+on:
+  pull_request: {}
+  push: {}
+  workflow_dispatch: {}
+
+name: Test
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Run Ginkgo
+        run: go run github.com/onsi/ginkgo/v2/ginkgo -r --randomize-all --randomize-suites --race --trace --fail-on-pending --keep-going --github-output
