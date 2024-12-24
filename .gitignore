@@ -22,3 +22,5 @@ oxide-rancher-machine-driver
 
 *.tar
 *.tar.gz
+
+dist
