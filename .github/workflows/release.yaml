@@ -19,6 +19,7 @@ concurrency:
 jobs:
   version:
     name: Configure Version
+    runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.output_version.outputs.version }}
     steps:
