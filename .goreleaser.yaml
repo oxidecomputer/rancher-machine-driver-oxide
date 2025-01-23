@@ -28,6 +28,3 @@ archives:
 
 checksum:
   name_template: "{{ .ProjectName }}_SHA256SUMS"
-
-changelog:
-  disable: true
