@@ -56,3 +56,32 @@ Apply the Kubernetes manifest to create the Oxide Rancher node driver.
 ----
 kubectl apply -f oxide-nodedriver.yaml
 ----
+
+== Releasing
+
+This project uses https://goreleaser.com/[GoReleaser] to build binaries and
+create GitHub releases. The release process is as follows.
+
+. Determine the version to be released. This could be a new major version or a
+minor or patch version (e.g., `+v1.0.0+`).
+
+. Determine the version control revision to be released (e.g., `+1a0acaf+`).
+Usually this is the latest revision on the default branch for major version
+releases but it could be another revision for minor or patch releases.
+
+. Create a Git tag on the version control revision with a name that matches the
+version to be released (e.g., `+git tag -a v1.0.0 1a0acaf+`).
+
+. Push the newly created Git tag to GitHub (e.g., `+git push origin v1.0.0+`).
+
+. Monitor the latest
+https://github.com/oxidecomputer/rancher-machine-driver-oxide/actions/workflows/release.yaml[Release]
+GitHub Actions job to ensure it runs successfully.
+
+. Ensure the
+https://github.com/oxidecomputer/rancher-machine-driver-oxide/releases[GitHub Releases]
+page shows a new release for the desired version.
+
+.. Update the description for the release as necessary.
+
+.. Ensure the release is published, not a draft.
