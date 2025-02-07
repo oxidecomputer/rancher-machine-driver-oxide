@@ -35,7 +35,7 @@ metadata:
   name: oxide
   annotations:
     privateCredentialFields: token
-    publicCredentialFields: host,project
+    publicCredentialFields: host
   finalizers:
   - controller.cattle.io/node-driver-controller
 spec:
