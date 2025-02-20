@@ -17,7 +17,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version-file: "go.mod"
 
       - name: Run Ginkgo
         run: go run github.com/onsi/ginkgo/v2/ginkgo -r --randomize-all --randomize-suites --race --trace --fail-on-pending --keep-going --github-output
