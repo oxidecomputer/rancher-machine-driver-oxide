@@ -561,19 +561,34 @@ func (d *Driver) createSSHKeyPair() (*oxide.SshKey, error) {
 }
 
 // toRancherMachineState converts an Oxide instance state to a Rancher machine
-// state.
+// state. The semantics of the Rancher machine state.State values are not well
+// defined so the mappings are best effort based on reading the Rancher machine
+// source code and other implementations.
 func toRancherMachineState(instanceState oxide.InstanceState) state.State {
 	switch instanceState {
-	case oxide.InstanceStateCreating, oxide.InstanceStateStarting:
+	// oxide.InstanceStateRepairing describes an instance that is attempting to recover
+	// from a failure so state.Starting seems like the best fit.
+	case oxide.InstanceStateCreating, oxide.InstanceStateStarting, oxide.InstanceStateRebooting, oxide.InstanceStateRepairing:
 		return state.Starting
+
+	// oxide.InstanceStateMigrating describes an instance undergoing a live
+	// migration between hypervisors. The instance is meant to be available for
+	// the duration of the migration so state.Running seems like the best fit.
 	case oxide.InstanceStateRunning, oxide.InstanceStateMigrating:
 		return state.Running
-	case oxide.InstanceStateStopping, oxide.InstanceStateRebooting:
+
+	case oxide.InstanceStateStopping:
 		return state.Stopping
-	case oxide.InstanceStateStopped, oxide.InstanceStateRepairing:
+
+	case oxide.InstanceStateStopped:
 		return state.Stopped
-	case oxide.InstanceStateFailed, oxide.InstanceStateDestroyed:
+
+	case oxide.InstanceStateFailed:
 		return state.Error
+
+	case oxide.InstanceStateDestroyed:
+		return state.NotFound
+
 	default:
 		return state.None
 	}
