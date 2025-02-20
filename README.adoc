@@ -4,28 +4,37 @@ This repository contains the Oxide Rancher machine driver, also known as a node
 driver in Rancher parlance. Rancher uses this node driver to provision virtual
 machines on Oxide that can then be used to deploy Kubernetes clusters.
 
-== Build
+== Building
 
-Build the binary using `+make+`.
+Build the binary using `make`.
 
 [source,sh]
 ----
 make
 ----
 
-== Deployment
+== Deploying
 
-Upload the built binary somewhere accessible from Rancher. The binary name must
-match the format `+docker-machine-driver-*+` (e.g.,
-`+docker-machine-driver-oxide+`) otherwise Rancher will error when trying to
-activate the node driver.
+The binary name must match the format `docker-machine-driver-*` (e.g.,
+`docker-machine-driver-oxide`) otherwise Rancher will error when trying to use
+the node driver.
 
-Ensure your `+kubectl+` context is configured to use your Rancher Kubernetes
+=== Rancher Kubernetes
+
+IMPORTANT: You must deploy the Oxide node driver using
+the Kubernetes API rather than the Rancher UI otherwise
+Rancher will be unable to use the Oxide node driver. See
+https://github.com/oxidecomputer/rancher-machine-driver-oxide/issues/11 for
+more information.
+
+. Upload the `docker-machine-driver-oxide` binary somewhere accessible from
+Rancher Kubernetes.
+
+. Ensure your `kubectl` context is configured to use your Rancher Kubernetes
 cluster.
 
-Create the following Kubernetes manifest.
-
-.oxide-nodedriver.yaml
+. Create the following `oxide-nodedriver.yaml` Kubernetes manifest.
++
 [source,yaml]
 ----
 ---
@@ -42,7 +51,7 @@ spec:
   active: true
   addCloudCredential: true
   builtin: false
-  checksum: <SHA256SUM_OF_BINARY>
+  checksum: <SHA256SUM_OF_NODE_DRIVER_BINARY>
   description: "Oxide Rancher node driver."
   displayName: oxide
   externalId: ""
@@ -50,11 +59,37 @@ spec:
   url: "https://example.com/docker-machine-driver-oxide"
 ----
 
-Apply the Kubernetes manifest to create the Oxide Rancher node driver.
-
+. Apply the Kubernetes manifest to create the Oxide Rancher node driver.
++
 [source,sh]
 ----
 kubectl apply -f oxide-nodedriver.yaml
+----
+
+=== Rancher Machine CLI
+
+. Install https://github.com/rancher/machine[`rancher-machine`].
+
+. Place the `docker-machine-driver-oxide` binary somewhere on `PATH`.
+
+. Use `rancher-machine` to create an Oxide instance.
++
+[source,sh]
+----
+rancher-machine create \
+  --driver oxide \
+  --oxide-additional-ssh-public-key-ids 529885a0-2919-463a-a588-ac48f100a165 \
+  --oxide-boot-disk-image-id feb2c8ee-5a1d-4d66-beeb-289b860561bf \
+  --oxide-boot-disk-size "21474836480" \
+  --oxide-host https://silo01.oxide.example.com \
+  --oxide-memory "4294967296" \
+  --oxide-project exampleproject \
+  --oxide-ssh-user ubuntu \
+  --oxide-subnet "default" \
+  --oxide-token oxide-token-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX \
+  --oxide-vcpus "2" \
+  --oxide-vpc "default" \
+  example-oxide-machine
 ----
 
 == Releasing
@@ -63,16 +98,16 @@ This project uses https://goreleaser.com/[GoReleaser] to build binaries and
 create GitHub releases. The release process is as follows.
 
 . Determine the version to be released. This could be a new major version or a
-minor or patch version (e.g., `+v1.0.0+`).
+minor or patch version (e.g., `v1.0.0`).
 
-. Determine the version control revision to be released (e.g., `+1a0acaf+`).
+. Determine the version control revision to be released (e.g., `1a0acaf`).
 Usually this is the latest revision on the default branch for major version
 releases but it could be another revision for minor or patch releases.
 
 . Create a Git tag on the version control revision with a name that matches the
-version to be released (e.g., `+git tag -a v1.0.0 1a0acaf+`).
+version to be released (e.g., `git tag -a v1.0.0 1a0acaf`).
 
-. Push the newly created Git tag to GitHub (e.g., `+git push origin v1.0.0+`).
+. Push the newly created Git tag to GitHub (e.g., `git push origin v1.0.0`).
 
 . Monitor the latest
 https://github.com/oxidecomputer/rancher-machine-driver-oxide/actions/workflows/release.yaml[Release]
