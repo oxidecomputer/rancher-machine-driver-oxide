@@ -64,11 +64,11 @@ var _ = Describe("Driver", func() {
 		Entry("running", oxide.InstanceStateRunning, state.Running),
 		Entry("stopping", oxide.InstanceStateStopping, state.Stopping),
 		Entry("stopped", oxide.InstanceStateStopped, state.Stopped),
-		Entry("repairing", oxide.InstanceStateRepairing, state.Stopped),
-		Entry("rebooting", oxide.InstanceStateRebooting, state.Stopping),
+		Entry("repairing", oxide.InstanceStateRepairing, state.Starting),
+		Entry("rebooting", oxide.InstanceStateRebooting, state.Starting),
 		Entry("migrating", oxide.InstanceStateMigrating, state.Running),
 		Entry("failed", oxide.InstanceStateFailed, state.Error),
-		Entry("destroyed", oxide.InstanceStateDestroyed, state.Error),
+		Entry("destroyed", oxide.InstanceStateDestroyed, state.NotFound),
 		Entry("unknown", oxide.InstanceState("unknown"), state.None),
 	)
 })
