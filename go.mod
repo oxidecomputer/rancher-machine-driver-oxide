@@ -1,6 +1,6 @@
 module github.com/oxidecomputer/rancher-machine-driver-oxide
 
-go 1.23.3
+go 1.24.0
 
 replace (
 	github.com/docker/docker => github.com/moby/moby v1.4.2-0.20170731201646-1009e6a40b29
