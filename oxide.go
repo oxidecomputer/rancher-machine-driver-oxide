@@ -17,33 +17,17 @@ import (
 
 	"github.com/oxidecomputer/oxide.go/oxide"
 	"github.com/rancher/machine/libmachine/drivers"
-	"github.com/rancher/machine/libmachine/mcnflag"
+	"github.com/rancher/machine/libmachine/log"
 	"github.com/rancher/machine/libmachine/ssh"
 	"github.com/rancher/machine/libmachine/state"
 )
 
 const (
-	defaultSSHUser     = "oxide"
-	defaultSSHPort     = 22
-	defaultDescription = "Managed by the Oxide Rancher machine driver."
+	defaultSSHUser          = "oxide"
+	defaultSSHPort          = 22
+	defaultDescription      = "Managed by the Oxide Rancher machine driver."
+	errRequiredOptionNotSet = "required option not set: "
 )
-
-const (
-	flagHost                      = "oxide-host"
-	flagToken                     = "oxide-token"
-	flagProject                   = "oxide-project"
-	flagVCPUs                     = "oxide-vcpus"
-	flagMemory                    = "oxide-memory"
-	flagBootDiskSize              = "oxide-boot-disk-size"
-	flagBootDiskImageID           = "oxide-boot-disk-image-id"
-	flagVPC                       = "oxide-vpc"
-	flagSubnet                    = "oxide-subnet"
-	flagUserDataFile              = "oxide-user-data-file"
-	flagSSHUser                   = "oxide-ssh-user"
-	flagAdditionalSSHPublicKeyIDs = "oxide-additional-ssh-public-key-ids"
-)
-
-const errRequiredOptionNotSet = "required option not set: "
 
 // make sure Driver implements the drivers.Driver interface.
 var _ drivers.Driver = &Driver{}
@@ -77,6 +61,10 @@ type Driver struct {
 	// Image ID to use for the instance's boot disk.
 	BootDiskImageID string
 
+	// Size of hte instance's additional disk
+	AdditionalDiskSizesStrings []string
+	AdditionalDisks            []AdditionalDisk
+
 	// VPC for the instance.
 	VPC string
 
@@ -97,6 +85,9 @@ type Driver struct {
 	// `Remove`.
 	BootDiskID string
 
+	// IDs of the additional disks
+	AdditionalDiskIDs []string
+
 	// ID of the generated SSH public key that's injected into the instance.
 	// Used to delete the SSH public key during `Remove`.
 	SSHPublicKeyID string
@@ -116,31 +107,27 @@ func newDriver(machineName, storePath string) *Driver {
 	}
 }
 
-// createOxideClient creates an Oxide client from the machine driver
-// configuration.
-func (d *Driver) createOxideClient() (*oxide.Client, error) {
-	return oxide.NewClient(&oxide.Config{
-		Host:      d.Host,
-		Token:     d.Token,
-		UserAgent: "Oxide Rancher Machine Driver/0.0.1 (Go; Linux) [Environment: Development]",
-	})
-}
-
 // Create creates the instance and any necessary dependencies (e.g., SSH keys,
 // disks) and updates the machine driver with state for use by other methods.
 // Create must start the instance otherwise the machine driver will time out
 // waiting for the instance to start.
 func (d *Driver) Create() error {
+	ctx := context.TODO()
+
 	if d.oxideClient == nil {
 		client, err := d.createOxideClient()
 		if err != nil {
+			log.Errorf("Failed to create Oxide client: %v", err)
 			return err
 		}
 		d.oxideClient = client
 	}
+	log.Debug("Created Oxide client")
 
 	pubKey, err := d.createSSHKeyPair()
+	log.Debug("Created SSH public key")
 	if err != nil {
+		log.Errorf("Failed to create SSH public key: %v", err)
 		return err
 	}
 
@@ -162,9 +149,11 @@ func (d *Driver) Create() error {
 		userData = b
 	}
 
+	startInstance := false
 	icp := oxide.InstanceCreateParams{
 		Project: oxide.NameOrId(d.Project),
 		Body: &oxide.InstanceCreate{
+			Start: &startInstance,
 			BootDisk: &oxide.InstanceDiskAttachment{
 				Description: defaultDescription,
 				DiskSource: oxide.DiskSource{
@@ -175,6 +164,7 @@ func (d *Driver) Create() error {
 				Size: oxide.ByteCount(d.BootDiskSize),
 				Type: oxide.InstanceDiskAttachmentTypeCreate,
 			},
+			Disks:       []oxide.InstanceDiskAttachment{},
 			Description: defaultDescription,
 			Hostname:    oxide.Hostname(d.GetMachineName()),
 			Memory:      oxide.ByteCount(d.Memory),
@@ -195,114 +185,79 @@ func (d *Driver) Create() error {
 			UserData:      base64.StdEncoding.EncodeToString(userData),
 		},
 	}
-	instance, err := d.oxideClient.InstanceCreate(context.TODO(), icp)
+
+	d.AdditionalDiskIDs = make([]string, 0)
+	for i, additionalDisk := range d.AdditionalDisks {
+		diskName := additionalDisk.DiskName(d.GetMachineName(), i)
+		log.Errorf("create disk %s", diskName)
+		disk, err := d.oxideClient.DiskCreate(ctx, oxide.DiskCreateParams{
+			Project: oxide.NameOrId(d.Project),
+			Body: &oxide.DiskCreate{
+				Description: defaultDescription,
+				DiskSource: oxide.DiskSource{
+					BlockSize: oxide.BlockSize(512),
+					Type:      oxide.DiskSourceTypeBlank,
+				},
+				Name: diskName,
+				Size: oxide.ByteCount(additionalDisk.Size),
+			},
+		})
+		if err != nil {
+			log.Errorf("Error creating disk %s: %v", diskName, err)
+			return err
+		}
+		log.Infof("Created disk %s", diskName)
+
+		d.AdditionalDiskIDs = append(d.AdditionalDiskIDs, disk.Id)
+	}
+
+	instance, err := d.oxideClient.InstanceCreate(ctx, icp)
 	if err != nil {
+		log.Errorf("Error creating instance: %v", err)
 		return err
 	}
 
 	d.InstanceID = instance.Id
 	d.BootDiskID = instance.BootDiskId
 
+	log.Infof("boot disk id %s", d.BootDiskID)
+
+	for _, diskId := range d.AdditionalDiskIDs {
+		_, err = d.oxideClient.InstanceDiskAttach(ctx, oxide.InstanceDiskAttachParams{
+			Instance: oxide.NameOrId(instance.Id),
+			Body: &oxide.DiskPath{
+				Disk: oxide.NameOrId(diskId),
+			},
+		})
+		if err != nil {
+			log.Errorf("Error attaching disk %s: %v", diskId, err)
+			return err
+		}
+		log.Infof("Attached disk %s", diskId)
+	}
+
 	inilp := oxide.InstanceNetworkInterfaceListParams{
 		Instance: oxide.NameOrId(d.InstanceID),
 	}
-	networkInterfaces, err := d.oxideClient.InstanceNetworkInterfaceListAllPages(context.TODO(), inilp)
+	networkInterfaces, err := d.oxideClient.InstanceNetworkInterfaceListAllPages(ctx, inilp)
 	if err != nil {
+		log.Errorf("Error listing network interfaces: %v", err)
 		return err
 	}
 
 	if len(networkInterfaces) == 0 {
-		return errors.New("no valid network interfaces found")
+		err = errors.New("no valid network interfaces found")
+		log.Errorf("Error listing network interfaces: %v", err)
+		return err
 	}
 	d.IPAddress = networkInterfaces[0].Ip
 
-	return nil
+	return d.Start()
 }
 
 // DriverName returns the name of this machine driver.
 func (d *Driver) DriverName() string {
 	return "oxide"
-}
-
-// GetCreateFlags configures the CLI flags for machine driver.
-func (d *Driver) GetCreateFlags() []mcnflag.Flag {
-	return []mcnflag.Flag{
-		mcnflag.StringFlag{
-			Name:   flagHost,
-			Usage:  "Oxide silo domain name (e.g., https://silo01.oxide.example.com). This is `OXIDE_HOST` when authenticating via the Oxide CLI.",
-			EnvVar: "OXIDE_HOST",
-		},
-		mcnflag.StringFlag{
-			Name:   flagToken,
-			Usage:  "Oxide API token. This is `OXIDE_TOKEN` when authenticating via the Oxide CLI.",
-			EnvVar: "OXIDE_TOKEN",
-		},
-		mcnflag.StringFlag{
-			Name:   flagProject,
-			Usage:  "Oxide project to create instances within.",
-			EnvVar: "OXIDE_PROJECT",
-		},
-
-		// Instance hardware.
-		mcnflag.IntFlag{
-			Name:   flagVCPUs,
-			Usage:  "Number of vCPUs to give the instance.",
-			EnvVar: "OXIDE_VCPUS",
-			Value:  2,
-		},
-		mcnflag.IntFlag{
-			Name:   flagMemory,
-			Usage:  "Amount of memory, in bytes, to give the instance.",
-			EnvVar: "OXIDE_MEMORY",
-			Value:  4294967296, // 4 GiB
-		},
-
-		// Boot disk.
-		mcnflag.IntFlag{
-			Name:   flagBootDiskSize,
-			Usage:  "Size of the instance's boot disk, in bytes.",
-			EnvVar: "OXIDE_BOOT_DISK_SIZE",
-			Value:  21474836480, // 20 GiB
-		},
-		mcnflag.StringFlag{
-			Name:   flagBootDiskImageID,
-			Usage:  "Image ID to use for the instance's boot disk.",
-			EnvVar: "OXIDE_BOOT_DISK_IMAGE_ID",
-		},
-
-		// Networking.
-		mcnflag.StringFlag{
-			Name:   flagVPC,
-			Usage:  "VPC for the instance.",
-			EnvVar: "OXIDE_VPC",
-			Value:  "default",
-		},
-		mcnflag.StringFlag{
-			Name:   flagSubnet,
-			Usage:  "Subnet for the instance.",
-			EnvVar: "OXIDE_SUBNET",
-			Value:  "default",
-		},
-
-		// User data.
-		mcnflag.StringFlag{
-			Name:   flagUserDataFile,
-			Usage:  "Path to file containing user data.",
-			EnvVar: "OXIDE_USER_DATA_FILE",
-		},
-
-		// SSH information.
-		mcnflag.StringFlag{
-			Name:   flagSSHUser,
-			Usage:  "User to SSH into the instance",
-			EnvVar: "OXIDE_SSH_USER",
-		},
-		mcnflag.StringSliceFlag{
-			Name:   flagAdditionalSSHPublicKeyIDs,
-			Usage:  "Additional SSH public keys to inject into the instance.",
-			EnvVar: "OXIDE_ADDITIONAL_SSH_PUBLIC_KEY_IDS",
-		},
-	}
 }
 
 // GetSSHHostname returns the IP address or DNS name of the instance.
@@ -315,6 +270,8 @@ func (d *Driver) GetSSHHostname() (string, error) {
 // GetState fetches the current state of the instance and returns it as
 // a standardized state representation that Rancher can understand.
 func (d *Driver) GetState() (state.State, error) {
+	ctx := context.Background()
+
 	if d.oxideClient == nil {
 		client, err := d.createOxideClient()
 		if err != nil {
@@ -323,10 +280,11 @@ func (d *Driver) GetState() (state.State, error) {
 		d.oxideClient = client
 	}
 
-	instance, err := d.oxideClient.InstanceView(context.TODO(), oxide.InstanceViewParams{
+	instance, err := d.oxideClient.InstanceView(ctx, oxide.InstanceViewParams{
 		Instance: oxide.NameOrId(d.InstanceID),
 	})
 	if err != nil {
+		log.Errorf("Error getting instance state %s: %v", d.InstanceID, err)
 		return state.None, err
 	}
 
@@ -337,11 +295,13 @@ func (d *Driver) GetState() (state.State, error) {
 // connect to the instance.
 func (d *Driver) GetURL() (string, error) {
 	if err := drivers.MustBeRunning(d); err != nil {
+		log.Errorf("driver is not running: %v", err)
 		return "", err
 	}
 
 	ip, err := d.GetIP()
 	if err != nil {
+		log.Errorf("Error getting IP: %v", err)
 		return "", err
 	}
 
@@ -360,18 +320,21 @@ func (d *Driver) Kill() error {
 
 // PreCreateCheck performs necessary driver validation before creating any
 // instance.
-func (d *Driver) PreCreateCheck() error {
+func (d *Driver) PreCreateCheck() (err error) {
 	if d.UserDataFile != "" {
-		if _, err := os.Stat(d.UserDataFile); os.IsNotExist(err) {
-			return fmt.Errorf("user data file %s could not be found", d.UserDataFile)
+		if _, err = os.Stat(d.UserDataFile); os.IsNotExist(err) {
+			err = fmt.Errorf("user data file %s could not be found", d.UserDataFile)
 		}
 	}
-	return nil
+
+	return
 }
 
 // Remove stops and removes the instance and any dependencies so that
 // they no longer exist in Oxide.
 func (d *Driver) Remove() error {
+	ctx := context.Background()
+
 	if d.oxideClient == nil {
 		client, err := d.createOxideClient()
 		if err != nil {
@@ -381,22 +344,26 @@ func (d *Driver) Remove() error {
 	}
 
 	if err := d.Stop(); err != nil {
+		log.Errorf("Error stopping instance: %v", err)
 		return err
 	}
 
 	// The instance cannot be deleted until it's stopped. Wait for it to stop.
-	stopCtx, cancel := context.WithTimeout(context.TODO(), 2*time.Minute)
+	stopCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
 	for {
 		select {
 		case <-stopCtx.Done():
-			return fmt.Errorf("timed out waiting for instance to stop: %w", stopCtx.Err())
+			err := fmt.Errorf("timed out waiting for instance to stop: %w", stopCtx.Err())
+			log.Errorf("Error stopping instance: %v", err)
+			return err
 		default:
 		}
 
 		currentState, err := d.GetState()
 		if err != nil {
+			log.Errorf("Error getting instance state: %v", err)
 			return err
 		}
 
@@ -405,22 +372,35 @@ func (d *Driver) Remove() error {
 		}
 	}
 
-	if err := d.oxideClient.CurrentUserSshKeyDelete(context.TODO(), oxide.CurrentUserSshKeyDeleteParams{
+	if err := d.oxideClient.CurrentUserSshKeyDelete(ctx, oxide.CurrentUserSshKeyDeleteParams{
 		SshKey: oxide.NameOrId(d.SSHPublicKeyID),
 	}); err != nil {
+		log.Errorf("Error deleting ssh key: %v", err)
 		return err
 	}
 
-	if err := d.oxideClient.InstanceDelete(context.TODO(), oxide.InstanceDeleteParams{
+	if err := d.oxideClient.InstanceDelete(ctx, oxide.InstanceDeleteParams{
 		Instance: oxide.NameOrId(d.InstanceID),
 	}); err != nil {
+		log.Errorf("Error deleting instance: %v", err)
 		return err
 	}
 
-	if err := d.oxideClient.DiskDelete(context.TODO(), oxide.DiskDeleteParams{
+	if err := d.oxideClient.DiskDelete(ctx, oxide.DiskDeleteParams{
 		Disk: oxide.NameOrId(d.BootDiskID),
 	}); err != nil {
+		log.Errorf("Error deleting disk: %v", err)
 		return err
+	}
+
+	for _, diskID := range d.AdditionalDiskIDs {
+		log.Infof("diskID to delete: (%s)", diskID)
+		if err := d.oxideClient.DiskDelete(ctx, oxide.DiskDeleteParams{
+			Disk: oxide.NameOrId(diskID),
+		}); err != nil {
+			log.Errorf("Error deleting disk %s: %v", diskID, err)
+			return err
+		}
 	}
 
 	return nil
@@ -428,6 +408,8 @@ func (d *Driver) Remove() error {
 
 // Restart restarts the instance without changing its configuration.
 func (d *Driver) Restart() error {
+	ctx := context.Background()
+
 	if d.oxideClient == nil {
 		client, err := d.createOxideClient()
 		if err != nil {
@@ -436,53 +418,13 @@ func (d *Driver) Restart() error {
 		d.oxideClient = client
 	}
 
+	log.Debug("Restarting instance")
 	irp := oxide.InstanceRebootParams{
 		Instance: oxide.NameOrId(d.InstanceID),
 	}
-	if _, err := d.oxideClient.InstanceReboot(context.TODO(), irp); err != nil {
+	if _, err := d.oxideClient.InstanceReboot(ctx, irp); err != nil {
+		log.Errorf("Error restarting instance: %v", err)
 		return err
-	}
-
-	return nil
-}
-
-// SetConfigFromFlags reads the CLI flags and sets necessary state on the
-// driver for use by other methods.
-func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
-	d.Host = opts.String(flagHost)
-	d.Token = opts.String(flagToken)
-	d.Project = opts.String(flagProject)
-	d.VCPUS = opts.Int(flagVCPUs)
-	d.Memory = opts.Int(flagMemory)
-	d.BootDiskSize = opts.Int(flagBootDiskSize)
-	d.BootDiskImageID = opts.String(flagBootDiskImageID)
-	d.VPC = opts.String(flagVPC)
-	d.Subnet = opts.String(flagSubnet)
-	d.UserDataFile = opts.String(flagUserDataFile)
-	d.SSHUser = opts.String(flagSSHUser)
-	d.AdditionalSSHPublicKeyIDs = opts.StringSlice(flagAdditionalSSHPublicKeyIDs)
-	d.SSHPort = defaultSSHPort
-
-	var errRequiredFlag error
-
-	if d.Host == "" {
-		errRequiredFlag = errors.Join(errRequiredFlag, errors.New(errRequiredOptionNotSet+flagHost))
-	}
-
-	if d.Token == "" {
-		errRequiredFlag = errors.Join(errRequiredFlag, errors.New(errRequiredOptionNotSet+flagToken))
-	}
-
-	if d.Project == "" {
-		errRequiredFlag = errors.Join(errRequiredFlag, errors.New(errRequiredOptionNotSet+flagProject))
-	}
-
-	if d.BootDiskImageID == "" {
-		errRequiredFlag = errors.Join(errRequiredFlag, errors.New(errRequiredOptionNotSet+flagBootDiskImageID))
-	}
-
-	if errRequiredFlag != nil {
-		return errRequiredFlag
 	}
 
 	return nil
@@ -490,6 +432,8 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 
 // Start starts the instance.
 func (d *Driver) Start() error {
+	ctx := context.Background()
+
 	if d.oxideClient == nil {
 		client, err := d.createOxideClient()
 		if err != nil {
@@ -498,10 +442,12 @@ func (d *Driver) Start() error {
 		d.oxideClient = client
 	}
 
+	log.Debug("starting instance")
 	isp := oxide.InstanceStartParams{
 		Instance: oxide.NameOrId(d.InstanceID),
 	}
-	if _, err := d.oxideClient.InstanceStart(context.TODO(), isp); err != nil {
+	if _, err := d.oxideClient.InstanceStart(ctx, isp); err != nil {
+		log.Errorf("error starting instance: %v", err)
 		return err
 	}
 
@@ -510,6 +456,8 @@ func (d *Driver) Start() error {
 
 // Stop stops the instance.
 func (d *Driver) Stop() error {
+	ctx := context.Background()
+
 	if d.oxideClient == nil {
 		client, err := d.createOxideClient()
 		if err != nil {
@@ -518,10 +466,12 @@ func (d *Driver) Stop() error {
 		d.oxideClient = client
 	}
 
+	log.Debug("stopping instance")
 	isp := oxide.InstanceStopParams{
 		Instance: oxide.NameOrId(d.InstanceID),
 	}
-	if _, err := d.oxideClient.InstanceStop(context.TODO(), isp); err != nil {
+	if _, err := d.oxideClient.InstanceStop(ctx, isp); err != nil {
+		log.Errorf("error stopping instance: %v", err)
 		return err
 	}
 
@@ -532,6 +482,9 @@ func (d *Driver) Stop() error {
 // public key to the store path for the machine driver to use, and uploads the
 // public key to Oxide to be injected into the instance.
 func (d *Driver) createSSHKeyPair() (*oxide.SshKey, error) {
+	log.Debug("creating ssh key")
+	ctx := context.Background()
+
 	if d.oxideClient == nil {
 		client, err := d.createOxideClient()
 		if err != nil {
@@ -557,7 +510,7 @@ func (d *Driver) createSSHKeyPair() (*oxide.SshKey, error) {
 			PublicKey:   string(b),
 		},
 	}
-	return d.oxideClient.CurrentUserSshKeyCreate(context.TODO(), cuscp)
+	return d.oxideClient.CurrentUserSshKeyCreate(ctx, cuscp)
 }
 
 // toRancherMachineState converts an Oxide instance state to a Rancher machine

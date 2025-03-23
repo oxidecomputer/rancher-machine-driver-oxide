@@ -22,3 +22,11 @@ test:
 .PHONY: clean
 clean:
 	rm -f $(BINDIR)/*
+
+.PHONY: lint
+lint:
+	golangci-lint run
+
+.PHONY: lint-fix
+lint-fix:
+	golangci-lint run --fix

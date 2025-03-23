@@ -8,9 +8,10 @@ replace (
 )
 
 require (
+	github.com/dustin/go-humanize v1.0.1
 	github.com/onsi/ginkgo/v2 v2.22.0
 	github.com/onsi/gomega v1.36.1
-	github.com/oxidecomputer/oxide.go v0.1.0-beta9
+	github.com/oxidecomputer/oxide.go v0.3.0
 	github.com/rancher/machine v0.15.0-rancher122
 )
 
@@ -21,6 +22,7 @@ require (
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/google/pprof v0.0.0-20241029153458-d1b30febd7db // indirect
+	github.com/pelletier/go-toml v1.9.5 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/urfave/cli v1.22.15 // indirect
 	golang.org/x/crypto v0.35.0 // indirect
