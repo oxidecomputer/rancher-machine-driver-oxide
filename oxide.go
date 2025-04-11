@@ -112,6 +112,7 @@ func newDriver(machineName, storePath string) *Driver {
 // Create must start the instance otherwise the machine driver will time out
 // waiting for the instance to start.
 func (d *Driver) Create() error {
+	defer logEntry("Driver.Create")()
 	ctx := context.TODO()
 
 	if d.oxideClient == nil {
@@ -148,6 +149,8 @@ func (d *Driver) Create() error {
 		}
 		userData = b
 	}
+
+	log.Debugf("Created user data: %s", string(userData))
 
 	startInstance := false
 	icp := oxide.InstanceCreateParams{
@@ -257,12 +260,14 @@ func (d *Driver) Create() error {
 
 // DriverName returns the name of this machine driver.
 func (d *Driver) DriverName() string {
+	defer logEntry("Driver.DriverName")()
 	return "oxide"
 }
 
 // GetSSHHostname returns the IP address or DNS name of the instance.
 // This IP address or DNS name must be accessible from Rancher.
 func (d *Driver) GetSSHHostname() (string, error) {
+	defer logEntry("Driver.GetSSHHostname")()
 	// Use the embedded BaseDriver's logic.
 	return d.BaseDriver.GetIP()
 }
@@ -270,6 +275,7 @@ func (d *Driver) GetSSHHostname() (string, error) {
 // GetState fetches the current state of the instance and returns it as
 // a standardized state representation that Rancher can understand.
 func (d *Driver) GetState() (state.State, error) {
+	defer logEntry("Driver.GetState")()
 	ctx := context.Background()
 
 	if d.oxideClient == nil {
@@ -294,6 +300,7 @@ func (d *Driver) GetState() (state.State, error) {
 // GetURL builds and returns a Docker-compatible URL that can be used to
 // connect to the instance.
 func (d *Driver) GetURL() (string, error) {
+	defer logEntry("Driver.GetURL")()
 	if err := drivers.MustBeRunning(d); err != nil {
 		log.Errorf("driver is not running: %v", err)
 		return "", err
@@ -315,12 +322,14 @@ func (d *Driver) GetURL() (string, error) {
 
 // Kill forcefully stops the instance but does not remove it.
 func (d *Driver) Kill() error {
+	defer logEntry("Driver.Kill")()
 	return d.Stop()
 }
 
 // PreCreateCheck performs necessary driver validation before creating any
 // instance.
 func (d *Driver) PreCreateCheck() (err error) {
+	defer logEntry("Driver.PreCreateCheck")()
 	if d.UserDataFile != "" {
 		if _, err = os.Stat(d.UserDataFile); os.IsNotExist(err) {
 			err = fmt.Errorf("user data file %s could not be found", d.UserDataFile)
@@ -333,6 +342,7 @@ func (d *Driver) PreCreateCheck() (err error) {
 // Remove stops and removes the instance and any dependencies so that
 // they no longer exist in Oxide.
 func (d *Driver) Remove() error {
+	defer logEntry("Driver.Remove")()
 	ctx := context.Background()
 
 	if d.oxideClient == nil {
@@ -408,6 +418,7 @@ func (d *Driver) Remove() error {
 
 // Restart restarts the instance without changing its configuration.
 func (d *Driver) Restart() error {
+	defer logEntry("Driver.Restart")()
 	ctx := context.Background()
 
 	if d.oxideClient == nil {
@@ -432,6 +443,7 @@ func (d *Driver) Restart() error {
 
 // Start starts the instance.
 func (d *Driver) Start() error {
+	defer logEntry("Driver.Start")()
 	ctx := context.Background()
 
 	if d.oxideClient == nil {
@@ -456,6 +468,7 @@ func (d *Driver) Start() error {
 
 // Stop stops the instance.
 func (d *Driver) Stop() error {
+	defer logEntry("Driver.Stop")()
 	ctx := context.Background()
 
 	if d.oxideClient == nil {

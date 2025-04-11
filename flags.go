@@ -25,6 +25,7 @@ const (
 
 // GetCreateFlags configures the CLI flags for machine driver.
 func (d *Driver) GetCreateFlags() []mcnflag.Flag {
+	defer logEntry("Driver.GetCreateFlags yes")()
 	return []mcnflag.Flag{
 		mcnflag.StringFlag{
 			Name:   flagHost,
@@ -114,6 +115,7 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 // SetConfigFromFlags reads the CLI flags and sets necessary state on the
 // driver for use by other methods.
 func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
+	defer logEntry("Driver.SetConfigFromFlags")()
 	d.Host = opts.String(flagHost)
 	d.Token = opts.String(flagToken)
 	d.Project = opts.String(flagProject)
