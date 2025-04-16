@@ -13,8 +13,10 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/dustin/go-humanize"
 	"github.com/oxidecomputer/oxide.go/oxide"
 	"github.com/rancher/machine/libmachine/drivers"
 	"github.com/rancher/machine/libmachine/mcnflag"
@@ -36,6 +38,7 @@ const (
 	flagMemory                    = "oxide-memory"
 	flagBootDiskSize              = "oxide-boot-disk-size"
 	flagBootDiskImageID           = "oxide-boot-disk-image-id"
+	flagAdditionalDisks           = "oxide-additional-disks"
 	flagVPC                       = "oxide-vpc"
 	flagSubnet                    = "oxide-subnet"
 	flagUserDataFile              = "oxide-user-data-file"
@@ -69,10 +72,10 @@ type Driver struct {
 	VCPUS int
 
 	// Amount of memory, in bytes, to give the instance.
-	Memory int
+	Memory uint64
 
 	// Size of the instance's boot disk, in bytes.
-	BootDiskSize int
+	BootDiskSize uint64
 
 	// Image ID to use for the instance's boot disk.
 	BootDiskImageID string
@@ -83,11 +86,14 @@ type Driver struct {
 	// Subnet for the instance.
 	Subnet string
 
-	//
+	// Path to file containing user data for the instance.
 	UserDataFile string
 
 	// Additional SSH public keys to inject into the instance.
 	AdditionalSSHPublicKeyIDs []string
+
+	// Additional disks to attach to the instance.
+	AdditionalDisks []AdditionalDisk
 
 	// ID of the created instance. Used to retrieve instance state during
 	// `GetState` and to delete the instance during `Remove`.
@@ -100,6 +106,10 @@ type Driver struct {
 	// ID of the generated SSH public key that's injected into the instance.
 	// Used to delete the SSH public key during `Remove`.
 	SSHPublicKeyID string
+
+	// IDs of the additional disks attached to the instance. Used to delete the
+	// additional disks during `Remove`.
+	AdditionalDiskIDs []string
 
 	oxideClient *oxide.Client
 }
@@ -162,9 +172,24 @@ func (d *Driver) Create() error {
 		userData = b
 	}
 
+	disks := make([]oxide.InstanceDiskAttachment, len(d.AdditionalDisks))
+	for i, additionalDisk := range d.AdditionalDisks {
+		disks[i] = oxide.InstanceDiskAttachment{
+			Description: defaultDescription,
+			DiskSource: oxide.DiskSource{
+				BlockSize: oxide.BlockSize(4096),
+				Type:      oxide.DiskSourceTypeBlank,
+			},
+			Name: oxide.Name(additionalDisk.Name(d.MachineName, i)),
+			Size: oxide.ByteCount(additionalDisk.Size),
+			Type: oxide.InstanceDiskAttachmentTypeCreate,
+		}
+	}
+
 	icp := oxide.InstanceCreateParams{
 		Project: oxide.NameOrId(d.Project),
 		Body: &oxide.InstanceCreate{
+			AntiAffinityGroups: []oxide.NameOrId{}, // Cannot be unset due to bug: https://github.com/oxidecomputer/oxide.go/issues/282
 			BootDisk: &oxide.InstanceDiskAttachment{
 				Description: defaultDescription,
 				DiskSource: oxide.DiskSource{
@@ -175,6 +200,7 @@ func (d *Driver) Create() error {
 				Size: oxide.ByteCount(d.BootDiskSize),
 				Type: oxide.InstanceDiskAttachmentTypeCreate,
 			},
+			Disks:       disks,
 			Description: defaultDescription,
 			Hostname:    oxide.Hostname(d.GetMachineName()),
 			Memory:      oxide.ByteCount(d.Memory),
@@ -216,6 +242,22 @@ func (d *Driver) Create() error {
 	}
 	d.IPAddress = networkInterfaces[0].Ip
 
+	additionalDisks, err := d.oxideClient.InstanceDiskListAllPages(context.TODO(), oxide.InstanceDiskListParams{
+		Instance: oxide.NameOrId(d.InstanceID),
+	})
+	if err != nil {
+		return fmt.Errorf("failed listing disks for instance: %w", err)
+	}
+
+	d.AdditionalDiskIDs = make([]string, 0, len(d.AdditionalDisks))
+	for _, additionalDisk := range additionalDisks {
+		// The boot disk ID state is managed irrespective of the additional disks.
+		if additionalDisk.Id == instance.BootDiskId {
+			continue
+		}
+		d.AdditionalDiskIDs = append(d.AdditionalDiskIDs, additionalDisk.Id)
+	}
+
 	return nil
 }
 
@@ -250,19 +292,19 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			EnvVar: "OXIDE_VCPUS",
 			Value:  2,
 		},
-		mcnflag.IntFlag{
+		mcnflag.StringFlag{
 			Name:   flagMemory,
-			Usage:  "Amount of memory, in bytes, to give the instance.",
+			Usage:  "Amount of memory, in bytes, to give the instance. Supports a unit suffix (e.g., 4 GiB).",
 			EnvVar: "OXIDE_MEMORY",
-			Value:  4294967296, // 4 GiB
+			Value:  "4 GiB",
 		},
 
 		// Boot disk.
-		mcnflag.IntFlag{
+		mcnflag.StringFlag{
 			Name:   flagBootDiskSize,
-			Usage:  "Size of the instance's boot disk, in bytes.",
+			Usage:  "Size of the instance's boot disk, in bytes. Supports a unit suffix (e.g., 20 GiB).",
 			EnvVar: "OXIDE_BOOT_DISK_SIZE",
-			Value:  21474836480, // 20 GiB
+			Value:  "20 GiB",
 		},
 		mcnflag.StringFlag{
 			Name:   flagBootDiskImageID,
@@ -270,16 +312,23 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			EnvVar: "OXIDE_BOOT_DISK_IMAGE_ID",
 		},
 
+		// Additional disks.
+		mcnflag.StringSliceFlag{
+			Name:   flagAdditionalDisks,
+			Usage:  "Additional disks to attach to the instance in the format SIZE[,LABEL] where SIZE is the disk size in bytes and LABEL is an arbitrary string used within the disk name for identification. SIZE supports a unit suffix (e.g., 20 GiB).",
+			EnvVar: "OXIDE_ADDITIONAL_DISKS",
+		},
+
 		// Networking.
 		mcnflag.StringFlag{
 			Name:   flagVPC,
-			Usage:  "VPC for the instance.",
+			Usage:  "VPC name for the instance's network interface.",
 			EnvVar: "OXIDE_VPC",
 			Value:  "default",
 		},
 		mcnflag.StringFlag{
 			Name:   flagSubnet,
-			Usage:  "Subnet for the instance.",
+			Usage:  "Subnet name for the instance's network interface.",
 			EnvVar: "OXIDE_SUBNET",
 			Value:  "default",
 		},
@@ -287,19 +336,19 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 		// User data.
 		mcnflag.StringFlag{
 			Name:   flagUserDataFile,
-			Usage:  "Path to file containing user data.",
+			Usage:  "Path to file containing user data for the instance.",
 			EnvVar: "OXIDE_USER_DATA_FILE",
 		},
 
 		// SSH information.
 		mcnflag.StringFlag{
 			Name:   flagSSHUser,
-			Usage:  "User to SSH into the instance",
+			Usage:  "User to use when connecting to the instance via SSH.",
 			EnvVar: "OXIDE_SSH_USER",
 		},
 		mcnflag.StringSliceFlag{
 			Name:   flagAdditionalSSHPublicKeyIDs,
-			Usage:  "Additional SSH public keys to inject into the instance.",
+			Usage:  "Additional SSH public keys IDs to inject into the instance.",
 			EnvVar: "OXIDE_ADDITIONAL_SSH_PUBLIC_KEY_IDS",
 		},
 	}
@@ -309,7 +358,7 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 // This IP address or DNS name must be accessible from Rancher.
 func (d *Driver) GetSSHHostname() (string, error) {
 	// Use the embedded BaseDriver's logic.
-	return d.BaseDriver.GetIP()
+	return d.GetIP()
 }
 
 // GetState fetches the current state of the instance and returns it as
@@ -423,6 +472,14 @@ func (d *Driver) Remove() error {
 		return err
 	}
 
+	for _, additionalDiskID := range d.AdditionalDiskIDs {
+		if err := d.oxideClient.DiskDelete(context.TODO(), oxide.DiskDeleteParams{
+			Disk: oxide.NameOrId(additionalDiskID),
+		}); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -453,8 +510,6 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 	d.Token = opts.String(flagToken)
 	d.Project = opts.String(flagProject)
 	d.VCPUS = opts.Int(flagVCPUs)
-	d.Memory = opts.Int(flagMemory)
-	d.BootDiskSize = opts.Int(flagBootDiskSize)
 	d.BootDiskImageID = opts.String(flagBootDiskImageID)
 	d.VPC = opts.String(flagVPC)
 	d.Subnet = opts.String(flagSubnet)
@@ -462,6 +517,29 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 	d.SSHUser = opts.String(flagSSHUser)
 	d.AdditionalSSHPublicKeyIDs = opts.StringSlice(flagAdditionalSSHPublicKeyIDs)
 	d.SSHPort = defaultSSHPort
+
+	var joinedParseErr error
+
+	memory, err := humanize.ParseBytes(opts.String(flagMemory))
+	joinedParseErr = errors.Join(joinedParseErr, err)
+	d.Memory = memory
+
+	bootDiskSize, err := humanize.ParseBytes(opts.String(flagBootDiskSize))
+	joinedParseErr = errors.Join(joinedParseErr, err)
+	d.BootDiskSize = bootDiskSize
+
+	d.AdditionalDisks = make([]AdditionalDisk, 0)
+	for _, diskInfo := range opts.StringSlice(flagAdditionalDisks) {
+		additionalDisk, err := ParseAdditionalDisk(diskInfo)
+		if err != nil {
+			joinedParseErr = errors.Join(joinedParseErr, err)
+		}
+		d.AdditionalDisks = append(d.AdditionalDisks, additionalDisk)
+	}
+
+	if joinedParseErr != nil {
+		return joinedParseErr
+	}
 
 	var errRequiredFlag error
 
@@ -592,4 +670,46 @@ func toRancherMachineState(instanceState oxide.InstanceState) state.State {
 	default:
 		return state.None
 	}
+}
+
+// AdditionalDisk represents a disk attached to an instance.
+type AdditionalDisk struct {
+	// Required. The size of the disk in bytes.
+	Size uint64
+
+	// An optional label to use in the disk name for ease of identification.
+	Label string
+}
+
+func ParseAdditionalDisk(s string) (AdditionalDisk, error) {
+	var sizeStr string
+	var label string
+
+	fields := strings.Split(s, ",")
+	switch len(fields) {
+	case 2:
+		sizeStr = fields[0]
+		label = fields[1]
+	case 1:
+		sizeStr = fields[0]
+		label = "additional"
+	default:
+		return AdditionalDisk{}, fmt.Errorf("invalid format %q, expected size[,label]", s)
+	}
+
+	size, err := humanize.ParseBytes(sizeStr)
+	if err != nil {
+		return AdditionalDisk{}, fmt.Errorf("failed parsing size %q %w", sizeStr, err)
+	}
+
+	a := AdditionalDisk{
+		Size:  size,
+		Label: label,
+	}
+
+	return a, nil
+}
+
+func (a AdditionalDisk) Name(machineName string, diskNumber int) string {
+	return fmt.Sprintf("disk-%02d-%s-%s", diskNumber, a.Label, machineName)
 }
