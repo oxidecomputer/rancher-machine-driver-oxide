@@ -25,9 +25,11 @@ import (
 )
 
 const (
-	defaultSSHUser     = "oxide"
-	defaultSSHPort     = 22
-	defaultDescription = "Managed by the Oxide Rancher machine driver."
+	defaultSSHUser      = "oxide"
+	defaultSSHPort      = 22
+	defaultDescription  = "Managed by the Oxide Rancher machine driver."
+	defaultMemory       = "4 GiB"
+	defaultBootDiskSize = "20 GiB"
 )
 
 const (
@@ -296,7 +298,7 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			Name:   flagMemory,
 			Usage:  "Amount of memory, in bytes, to give the instance. Supports a unit suffix (e.g., 4 GiB).",
 			EnvVar: "OXIDE_MEMORY",
-			Value:  "4 GiB",
+			Value:  defaultMemory,
 		},
 
 		// Boot disk.
@@ -304,7 +306,7 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			Name:   flagBootDiskSize,
 			Usage:  "Size of the instance's boot disk, in bytes. Supports a unit suffix (e.g., 20 GiB).",
 			EnvVar: "OXIDE_BOOT_DISK_SIZE",
-			Value:  "20 GiB",
+			Value:  defaultBootDiskSize,
 		},
 		mcnflag.StringFlag{
 			Name:   flagBootDiskImageID,
@@ -518,49 +520,64 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 	d.AdditionalSSHPublicKeyIDs = opts.StringSlice(flagAdditionalSSHPublicKeyIDs)
 	d.SSHPort = defaultSSHPort
 
-	var joinedParseErr error
+	// Required flags.
+	{
+		var errRequiredFlag error
 
-	memory, err := humanize.ParseBytes(opts.String(flagMemory))
-	joinedParseErr = errors.Join(joinedParseErr, err)
-	d.Memory = memory
-
-	bootDiskSize, err := humanize.ParseBytes(opts.String(flagBootDiskSize))
-	joinedParseErr = errors.Join(joinedParseErr, err)
-	d.BootDiskSize = bootDiskSize
-
-	d.AdditionalDisks = make([]AdditionalDisk, 0)
-	for _, diskInfo := range opts.StringSlice(flagAdditionalDisks) {
-		additionalDisk, err := ParseAdditionalDisk(diskInfo)
-		if err != nil {
-			joinedParseErr = errors.Join(joinedParseErr, err)
+		if d.Host == "" {
+			errRequiredFlag = errors.Join(errRequiredFlag, errors.New(errRequiredOptionNotSet+flagHost))
 		}
-		d.AdditionalDisks = append(d.AdditionalDisks, additionalDisk)
+
+		if d.Token == "" {
+			errRequiredFlag = errors.Join(errRequiredFlag, errors.New(errRequiredOptionNotSet+flagToken))
+		}
+
+		if d.Project == "" {
+			errRequiredFlag = errors.Join(errRequiredFlag, errors.New(errRequiredOptionNotSet+flagProject))
+		}
+
+		if d.BootDiskImageID == "" {
+			errRequiredFlag = errors.Join(errRequiredFlag, errors.New(errRequiredOptionNotSet+flagBootDiskImageID))
+		}
+
+		if errRequiredFlag != nil {
+			return errRequiredFlag
+		}
 	}
 
-	if joinedParseErr != nil {
-		return joinedParseErr
-	}
+	// Optional flags that need to be parsed. The logic is a bit verbose due to the
+	// type conversion between the flag and the field in the Driver struct.
+	{
+		var joinedParseErr error
 
-	var errRequiredFlag error
+		memoryStr := opts.String(flagMemory)
+		if memoryStr == "" {
+			memoryStr = defaultMemory
+		}
+		memory, err := humanize.ParseBytes(memoryStr)
+		joinedParseErr = errors.Join(joinedParseErr, err)
+		d.Memory = memory
 
-	if d.Host == "" {
-		errRequiredFlag = errors.Join(errRequiredFlag, errors.New(errRequiredOptionNotSet+flagHost))
-	}
+		bootDiskSizeStr := opts.String(flagBootDiskSize)
+		if bootDiskSizeStr == "" {
+			bootDiskSizeStr = defaultBootDiskSize
+		}
+		bootDiskSize, err := humanize.ParseBytes(bootDiskSizeStr)
+		joinedParseErr = errors.Join(joinedParseErr, err)
+		d.BootDiskSize = bootDiskSize
 
-	if d.Token == "" {
-		errRequiredFlag = errors.Join(errRequiredFlag, errors.New(errRequiredOptionNotSet+flagToken))
-	}
+		d.AdditionalDisks = make([]AdditionalDisk, 0)
+		for _, diskInfo := range opts.StringSlice(flagAdditionalDisks) {
+			additionalDisk, err := ParseAdditionalDisk(diskInfo)
+			if err != nil {
+				joinedParseErr = errors.Join(joinedParseErr, err)
+			}
+			d.AdditionalDisks = append(d.AdditionalDisks, additionalDisk)
+		}
 
-	if d.Project == "" {
-		errRequiredFlag = errors.Join(errRequiredFlag, errors.New(errRequiredOptionNotSet+flagProject))
-	}
-
-	if d.BootDiskImageID == "" {
-		errRequiredFlag = errors.Join(errRequiredFlag, errors.New(errRequiredOptionNotSet+flagBootDiskImageID))
-	}
-
-	if errRequiredFlag != nil {
-		return errRequiredFlag
+		if joinedParseErr != nil {
+			return joinedParseErr
+		}
 	}
 
 	return nil
@@ -683,16 +700,17 @@ type AdditionalDisk struct {
 
 func ParseAdditionalDisk(s string) (AdditionalDisk, error) {
 	var sizeStr string
-	var label string
+	label := "additional"
 
 	fields := strings.Split(s, ",")
 	switch len(fields) {
 	case 2:
 		sizeStr = fields[0]
-		label = fields[1]
+		if fields[1] != "" {
+			label = fields[1]
+		}
 	case 1:
 		sizeStr = fields[0]
-		label = "additional"
 	default:
 		return AdditionalDisk{}, fmt.Errorf("invalid format %q, expected size[,label]", s)
 	}
