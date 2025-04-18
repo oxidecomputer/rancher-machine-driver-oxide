@@ -48,8 +48,6 @@ const (
 	flagAdditionalSSHPublicKeyIDs = "oxide-additional-ssh-public-key-ids"
 )
 
-const errRequiredOptionNotSet = "required option not set: "
-
 // make sure Driver implements the drivers.Driver interface.
 var _ drivers.Driver = &Driver{}
 
@@ -525,26 +523,26 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 
 	// Required flags.
 	{
-		var errRequiredFlag error
+		var joinedRequiredFlagError error
 
 		if d.Host == "" {
-			errRequiredFlag = errors.Join(errRequiredFlag, errors.New(errRequiredOptionNotSet+flagHost))
+			joinedRequiredFlagError = errors.Join(joinedRequiredFlagError, NewRequiredFlagError(flagHost))
 		}
 
 		if d.Token == "" {
-			errRequiredFlag = errors.Join(errRequiredFlag, errors.New(errRequiredOptionNotSet+flagToken))
+			joinedRequiredFlagError = errors.Join(joinedRequiredFlagError, NewRequiredFlagError(flagToken))
 		}
 
 		if d.Project == "" {
-			errRequiredFlag = errors.Join(errRequiredFlag, errors.New(errRequiredOptionNotSet+flagProject))
+			joinedRequiredFlagError = errors.Join(joinedRequiredFlagError, NewRequiredFlagError(flagProject))
 		}
 
 		if d.BootDiskImageID == "" {
-			errRequiredFlag = errors.Join(errRequiredFlag, errors.New(errRequiredOptionNotSet+flagBootDiskImageID))
+			joinedRequiredFlagError = errors.Join(joinedRequiredFlagError, NewRequiredFlagError(flagBootDiskImageID))
 		}
 
-		if errRequiredFlag != nil {
-			return errRequiredFlag
+		if joinedRequiredFlagError != nil {
+			return joinedRequiredFlagError
 		}
 	}
 
@@ -558,7 +556,9 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 			memoryStr = defaultMemory
 		}
 		memory, err := humanize.ParseBytes(memoryStr)
-		joinedParseErr = errors.Join(joinedParseErr, err)
+		if err != nil {
+			joinedParseErr = errors.Join(joinedParseErr, NewParseError(flagMemory, memoryStr, err))
+		}
 		d.Memory = memory
 
 		bootDiskSizeStr := opts.String(flagBootDiskSize)
@@ -566,14 +566,16 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 			bootDiskSizeStr = defaultBootDiskSize
 		}
 		bootDiskSize, err := humanize.ParseBytes(bootDiskSizeStr)
-		joinedParseErr = errors.Join(joinedParseErr, err)
+		if err != nil {
+			joinedParseErr = errors.Join(joinedParseErr, NewParseError(flagBootDiskSize, bootDiskSizeStr, err))
+		}
 		d.BootDiskSize = bootDiskSize
 
 		d.AdditionalDisks = make([]AdditionalDisk, 0)
 		for _, diskInfo := range opts.StringSlice(flagAdditionalDisks) {
 			additionalDisk, err := ParseAdditionalDisk(diskInfo)
 			if err != nil {
-				joinedParseErr = errors.Join(joinedParseErr, err)
+				joinedParseErr = errors.Join(joinedParseErr, NewParseError(flagAdditionalDisks, bootDiskSizeStr, err))
 			}
 			d.AdditionalDisks = append(d.AdditionalDisks, additionalDisk)
 		}
