@@ -44,7 +44,7 @@ var _ = Describe("Driver", func() {
 
 			It("should fail when nothing is given", func() {
 				err := SUT.SetConfigFromFlags(&commandstest.FakeFlagger{
-					Data: map[string]interface{}{},
+					Data: map[string]any{},
 				})
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("required option not set: oxide-host"))
@@ -71,11 +71,25 @@ var _ = Describe("Driver", func() {
 		Entry("destroyed", oxide.InstanceStateDestroyed, state.NotFound),
 		Entry("unknown", oxide.InstanceState("unknown"), state.None),
 	)
+
+	DescribeTable("Successful ParseAdditionalDisk",
+		func(s string, expected AdditionalDisk) {
+			Expect(ParseAdditionalDisk(s)).To(Equal(expected))
+		},
+		Entry("parses integer without suffix", "21474836480", AdditionalDisk{Size: 21474836480, Label: "additional"}),
+		Entry("parses integer with suffix", "10GiB", AdditionalDisk{Size: 10737418240, Label: "additional"}),
+		Entry("parses integer with space suffix", "10 GiB", AdditionalDisk{Size: 10737418240, Label: "additional"}),
+		Entry("parses integer without suffix and label", "21474836480,data", AdditionalDisk{Size: 21474836480, Label: "data"}),
+		Entry("parses integer with suffix and label", "10GiB,data", AdditionalDisk{Size: 10737418240, Label: "data"}),
+		Entry("parses integer with space suffix and label", "10 GiB,data", AdditionalDisk{Size: 10737418240, Label: "data"}),
+		Entry("parses integer without suffix trailing comma", "21474836480,", AdditionalDisk{Size: 21474836480, Label: "additional"}),
+		Entry("parses integer with suffix trailing comma", "10GiB,", AdditionalDisk{Size: 10737418240, Label: "additional"}),
+	)
 })
 
 func defaultMockDriverOptions() (rv *commandstest.FakeFlagger) {
 	rv = &commandstest.FakeFlagger{
-		Data: map[string]interface{}{},
+		Data: map[string]any{},
 	}
 
 	rv.Data[flagHost] = "host"
