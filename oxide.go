@@ -40,7 +40,7 @@ const (
 	flagMemory                    = "oxide-memory"
 	flagBootDiskSize              = "oxide-boot-disk-size"
 	flagBootDiskImageID           = "oxide-boot-disk-image-id"
-	flagAdditionalDisks           = "oxide-additional-disks"
+	flagAdditionalDisks           = "oxide-additional-disks-sizes"
 	flagVPC                       = "oxide-vpc"
 	flagSubnet                    = "oxide-subnet"
 	flagUserDataFile              = "oxide-user-data-file"
@@ -315,10 +315,13 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 		},
 
 		// Additional disks.
+		// TODO: Breaking change since current names are already in production.
+		// Rename flag to `oxide-additional-disks` and environment variable to
+		// `OXIDE_ADDITIONAL_DISKS` to accurately reflect content.
 		mcnflag.StringSliceFlag{
 			Name:   flagAdditionalDisks,
 			Usage:  "Additional disks to attach to the instance in the format SIZE[,LABEL] where SIZE is the disk size in bytes and LABEL is an arbitrary string used within the disk name for identification. SIZE supports a unit suffix (e.g., 20 GiB).",
-			EnvVar: "OXIDE_ADDITIONAL_DISKS",
+			EnvVar: "OXIDE_ADDITIONAL_DISK_SIZE",
 		},
 
 		// Networking.
