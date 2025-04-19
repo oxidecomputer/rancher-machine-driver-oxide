@@ -18,28 +18,26 @@ func NewRequiredFlagError(option string) *RequiredFlagError {
 	return &RequiredFlagError{Flag: option}
 }
 
-// RequiredFlagError represents the error returned when a value for a flag
-// encountered an error during parsing. The underlying parsing error is embedded
-// for unwrapping.
-type ParseError struct {
-	Flag  string
-	Value string
-	Err   error
+// FlagParseError represents the error encountered when parsing a value for a
+// flag. The underlying error is embedded for unwrapping.
+type FlagParseError struct {
+	Flag string
+	Err  error
 }
 
 // Error implements the error interface.
-func (p *ParseError) Error() string {
-	return fmt.Sprintf("failed parsing %q for flag %q: %s", p.Flag, p.Flag, p.Err)
+func (p *FlagParseError) Error() string {
+	return fmt.Sprintf("failed parsing flag %q: %s", p.Flag, p.Err.Error())
 }
 
 // Unwrap allows the `ParseError` to be unwrapped using `errors.Is` and
 // `errors.As` to get access to its embedded error.
-func (p *ParseError) Unwrap() error {
+func (p *FlagParseError) Unwrap() error {
 	return p.Err
 }
 
-// NewParseError constructs a `ParseError` for the given flag, value, and
+// NewFlagParseError constructs a `FlagParseError` for the given flag and
 // embedded err.
-func NewParseError(flag string, data string, err error) *ParseError {
-	return &ParseError{Flag: flag, Value: data}
+func NewFlagParseError(flag string, err error) *FlagParseError {
+	return &FlagParseError{Flag: flag, Err: err}
 }
