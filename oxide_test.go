@@ -85,6 +85,14 @@ var _ = Describe("Driver", func() {
 		Entry("parses integer without suffix trailing comma", "21474836480,", AdditionalDisk{Size: 21474836480, Label: "additional"}),
 		Entry("parses integer with suffix trailing comma", "10GiB,", AdditionalDisk{Size: 10737418240, Label: "additional"}),
 	)
+
+	DescribeTable("Successful ParseExternalIP",
+		func(s string, expected ExternalIP) {
+			Expect(ParseExternalIP(s)).To(Equal(expected))
+		},
+		Entry("ephemeral", "ephemeral,a4720b36-006b-49fc-a029-583528f18a4d", ExternalIP{Type: "ephemeral", IPPoolID: "a4720b36-006b-49fc-a029-583528f18a4d"}),
+		Entry("floating", "floating,a4720b36-006b-49fc-a029-583528f18a4d", ExternalIP{Type: "floating", IPPoolID: "a4720b36-006b-49fc-a029-583528f18a4d"}),
+	)
 })
 
 func defaultMockDriverOptions() (rv *commandstest.FakeFlagger) {

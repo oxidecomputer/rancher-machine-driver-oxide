@@ -29,7 +29,7 @@ type ParseError struct {
 
 // Error implements the error interface.
 func (p *ParseError) Error() string {
-	return fmt.Sprintf("failed parsing %q for flag %q: %s", p.Flag, p.Flag, p.Err)
+	return fmt.Sprintf("failed parsing %q for flag %q: %s", p.Flag, p.Value, p.Err.Error())
 }
 
 // Unwrap allows the `ParseError` to be unwrapped using `errors.Is` and

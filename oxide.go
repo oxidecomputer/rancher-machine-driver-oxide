@@ -46,6 +46,7 @@ const (
 	flagUserDataFile              = "oxide-user-data-file"
 	flagSSHUser                   = "oxide-ssh-user"
 	flagAdditionalSSHPublicKeyIDs = "oxide-additional-ssh-public-key-ids"
+	flagExternalIPs               = "oxide-external-ips"
 )
 
 // make sure Driver implements the drivers.Driver interface.
@@ -85,6 +86,9 @@ type Driver struct {
 
 	// Subnet for the instance.
 	Subnet string
+
+	// External IPs to attach to the instance.
+	ExternalIPs []ExternalIP
 
 	// Path to file containing user data for the instance.
 	UserDataFile string
@@ -186,6 +190,24 @@ func (d *Driver) Create() error {
 		}
 	}
 
+	externalIPs := make([]oxide.ExternalIpCreate, len(d.ExternalIPs))
+	for i, externalIP := range d.ExternalIPs {
+		switch strings.ToLower(externalIP.Type) {
+		case "ephemeral":
+			externalIPs[i] = oxide.ExternalIpCreate{
+				Type: oxide.ExternalIpCreateTypeEphemeral,
+				Pool: oxide.NameOrId(externalIP.IPPoolID),
+			}
+		case "floating":
+			externalIPs[i] = oxide.ExternalIpCreate{
+				Type:       oxide.ExternalIpCreateTypeFloating,
+				FloatingIp: oxide.NameOrId(externalIP.IPPoolID),
+			}
+		default:
+			return fmt.Errorf("invalid external ip type %q", externalIP.Type)
+		}
+	}
+
 	icp := oxide.InstanceCreateParams{
 		Project: oxide.NameOrId(d.Project),
 		Body: &oxide.InstanceCreate{
@@ -202,6 +224,7 @@ func (d *Driver) Create() error {
 			},
 			Disks:       disks,
 			Description: defaultDescription,
+			ExternalIps: externalIPs,
 			Hostname:    oxide.Hostname(d.GetMachineName()),
 			Memory:      oxide.ByteCount(d.Memory),
 			Name:        oxide.Name(d.GetMachineName()),
@@ -318,7 +341,7 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 		// `OXIDE_ADDITIONAL_DISKS` to accurately reflect content.
 		mcnflag.StringSliceFlag{
 			Name:   flagAdditionalDisks,
-			Usage:  "Additional disks to attach to the instance in the format SIZE[,LABEL] where SIZE is the disk size in bytes and LABEL is an arbitrary string used within the disk name for identification. SIZE supports a unit suffix (e.g., 20 GiB).",
+			Usage:  "Additional disks to attach to the instance in the format `SIZE[,LABEL]` where `SIZE` is the disk size in bytes and `LABEL` is an arbitrary string used within the disk name for identification. `SIZE` supports a unit suffix (e.g., 20 GiB).",
 			EnvVar: "OXIDE_ADDITIONAL_DISK_SIZE",
 		},
 
@@ -334,6 +357,11 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			Usage:  "Subnet name for the instance's network interface.",
 			EnvVar: "OXIDE_SUBNET",
 			Value:  "default",
+		},
+		mcnflag.StringSliceFlag{
+			Name:   flagExternalIPs,
+			Usage:  "External IPs to attach to the instance in the format `TYPE,IP_POOL_ID` where `TYPE` is either `ephemeral` or `floating` and `IP_POOL_ID` is the ID of an existing IP pool.",
+			EnvVar: "OXIDE_EXTERNAL_IPS",
 		},
 
 		// User data.
@@ -580,6 +608,15 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 			d.AdditionalDisks = append(d.AdditionalDisks, additionalDisk)
 		}
 
+		d.ExternalIPs = make([]ExternalIP, 0)
+		for _, externalIPInfo := range opts.StringSlice(flagExternalIPs) {
+			externalIP, err := ParseExternalIP(externalIPInfo)
+			if err != nil {
+				joinedParseErr = errors.Join(joinedParseErr, NewParseError(flagExternalIPs, externalIPInfo, err))
+			}
+			d.ExternalIPs = append(d.ExternalIPs, externalIP)
+		}
+
 		if joinedParseErr != nil {
 			return joinedParseErr
 		}
@@ -703,6 +740,10 @@ type AdditionalDisk struct {
 	Label string
 }
 
+// ParseAdditionalDisk parses an `AdditionalDisk` from a string in the format
+// `SIZE[,LABEL]` where `SIZE` is the disk size in bytes and `LABEL` is an
+// arbitrary string used within the disk name for identification. `SIZE`
+// supports a unit suffix (e.g., 20 GiB).
 func ParseAdditionalDisk(s string) (AdditionalDisk, error) {
 	var sizeStr string
 	label := "additional"
@@ -733,6 +774,41 @@ func ParseAdditionalDisk(s string) (AdditionalDisk, error) {
 	return a, nil
 }
 
+// Name returns a string representing the disk name.
 func (a AdditionalDisk) Name(machineName string, diskNumber int) string {
 	return fmt.Sprintf("disk-%02d-%s-%s", diskNumber, a.Label, machineName)
+}
+
+// ExternalIP represents an external IP attached to an instance.
+type ExternalIP struct {
+	// External IP type. Meant to be `ephemeral` or `floating`.
+	Type string
+
+	// ID of an existing IP pool.
+	IPPoolID string
+}
+
+// ParseExternalIP parses an `ExternalIP` from a string in the format
+// `TYPE,IP_POOL_ID` where `TYPE` is either `ephemeral` or `floating` and
+// `IP_POOL_ID` is the ID of an existing IP pool.
+func ParseExternalIP(s string) (ExternalIP, error) {
+	fields := strings.Split(s, ",")
+
+	if len(fields) != 2 {
+		return ExternalIP{}, fmt.Errorf("invalid format %q, expected type,id", s)
+	}
+
+	ipType := fields[0]
+	ipPoolID := fields[1]
+
+	if ipType == "" || ipPoolID == "" {
+		return ExternalIP{}, fmt.Errorf("invalid value %q, both type and id must be provided", s)
+	}
+
+	e := ExternalIP{
+		Type:     ipType,
+		IPPoolID: ipPoolID,
+	}
+
+	return e, nil
 }
