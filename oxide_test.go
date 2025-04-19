@@ -72,19 +72,64 @@ var _ = Describe("Driver", func() {
 		Entry("unknown", oxide.InstanceState("unknown"), state.None),
 	)
 
-	DescribeTable("Successful ParseAdditionalDisk",
-		func(s string, expected AdditionalDisk) {
-			Expect(ParseAdditionalDisk(s)).To(Equal(expected))
-		},
-		Entry("parses integer without suffix", "21474836480", AdditionalDisk{Size: 21474836480, Label: "additional"}),
-		Entry("parses integer with suffix", "10GiB", AdditionalDisk{Size: 10737418240, Label: "additional"}),
-		Entry("parses integer with space suffix", "10 GiB", AdditionalDisk{Size: 10737418240, Label: "additional"}),
-		Entry("parses integer without suffix and label", "21474836480,data", AdditionalDisk{Size: 21474836480, Label: "data"}),
-		Entry("parses integer with suffix and label", "10GiB,data", AdditionalDisk{Size: 10737418240, Label: "data"}),
-		Entry("parses integer with space suffix and label", "10 GiB,data", AdditionalDisk{Size: 10737418240, Label: "data"}),
-		Entry("parses integer without suffix trailing comma", "21474836480,", AdditionalDisk{Size: 21474836480, Label: "additional"}),
-		Entry("parses integer with suffix trailing comma", "10GiB,", AdditionalDisk{Size: 10737418240, Label: "additional"}),
-	)
+	Describe("ParseAdditionalDisk", func() {
+		DescribeTable("Success",
+			func(s string, expected AdditionalDisk) {
+				Expect(ParseAdditionalDisk(s)).To(Equal(expected))
+			},
+			Entry("parses integer without suffix", "21474836480", AdditionalDisk{Size: 21474836480, Label: "additional"}),
+			Entry("parses integer with suffix", "10GiB", AdditionalDisk{Size: 10737418240, Label: "additional"}),
+			Entry("parses integer with space suffix", "10 GiB", AdditionalDisk{Size: 10737418240, Label: "additional"}),
+			Entry("parses integer without suffix and label", "21474836480,data", AdditionalDisk{Size: 21474836480, Label: "data"}),
+			Entry("parses integer with suffix and label", "10GiB,data", AdditionalDisk{Size: 10737418240, Label: "data"}),
+			Entry("parses integer with space suffix and label", "10 GiB,data", AdditionalDisk{Size: 10737418240, Label: "data"}),
+			Entry("parses integer without suffix trailing comma", "21474836480,", AdditionalDisk{Size: 21474836480, Label: "additional"}),
+			Entry("parses integer with suffix trailing comma", "10GiB,", AdditionalDisk{Size: 10737418240, Label: "additional"}),
+		)
+
+		DescribeTable("Error",
+			func(s string) {
+				_, err := ParseAdditionalDisk(s)
+				Expect(err).To(HaveOccurred())
+			},
+			Entry("errors with empty string", ""),
+			Entry("errors with empty invalid format", ","),
+			Entry("errors with no size", ",foo"),
+			Entry("errors with invalid size unit suffix", "20 ABC,"),
+		)
+	})
+
+	Describe("ParseExternalIP", func() {
+		DescribeTable("Success",
+			func(s string, expected ExternalIP) {
+				Expect(ParseExternalIP(s)).To(Equal(expected))
+			},
+			Entry("parses ephemeral ip with ip pool id", "ephemeral,a4720b36-006b-49fc-a029-583528f18a4d", ExternalIP{
+				Type: "ephemeral", NameOrID: "a4720b36-006b-49fc-a029-583528f18a4d",
+			}),
+			Entry("parses ephemeral ip with ip pool name", "ephemeral,ip_pool_foo", ExternalIP{
+				Type: "ephemeral", NameOrID: "ip_pool_foo",
+			}),
+			Entry("parses floating ip with floating ip id", "floating,a4720b36-006b-49fc-a029-583528f18a4d", ExternalIP{
+				Type: "floating", NameOrID: "a4720b36-006b-49fc-a029-583528f18a4d",
+			}),
+			Entry("parses floating ip with floating ip name", "floating,floating_ip_foo", ExternalIP{
+				Type: "floating", NameOrID: "floating_ip_foo",
+			}),
+		)
+
+		DescribeTable("Error",
+			func(s string) {
+				_, err := ParseExternalIP(s)
+				Expect(err).To(HaveOccurred())
+			},
+			Entry("errors with empty string", ""),
+			Entry("errors with empty invalid format", ","),
+			Entry("errors with no type", ",foo"),
+			Entry("errors with no ephemeral name_or_id", "ephemeral,"),
+			Entry("errors with no floating name_or_id", "floating,"),
+		)
+	})
 })
 
 func defaultMockDriverOptions() (rv *commandstest.FakeFlagger) {
