@@ -46,6 +46,7 @@ const (
 	flagUserDataFile              = "oxide-user-data-file"
 	flagSSHUser                   = "oxide-ssh-user"
 	flagAdditionalSSHPublicKeyIDs = "oxide-additional-ssh-public-key-ids"
+	flagAntiAffinityGroup         = "oxide-anti-affinity-group"
 )
 
 // make sure Driver implements the drivers.Driver interface.
@@ -91,6 +92,10 @@ type Driver struct {
 
 	// Additional SSH public keys to inject into the instance.
 	AdditionalSSHPublicKeyIDs []string
+
+	// Anti-affinity groups the instance will be a member of. The values can be IDs
+	// or names of anti-affinity groups.
+	AntiAffinityGroups []string
 
 	// Additional disks to attach to the instance.
 	AdditionalDisks []AdditionalDisk
@@ -186,10 +191,15 @@ func (d *Driver) Create() error {
 		}
 	}
 
+	antiAffinityGroups := make([]oxide.NameOrId, 0, len(d.AntiAffinityGroups))
+	for _, antiAffinityGroup := range d.AntiAffinityGroups {
+		antiAffinityGroups = append(antiAffinityGroups, oxide.NameOrId(antiAffinityGroup))
+	}
+
 	icp := oxide.InstanceCreateParams{
 		Project: oxide.NameOrId(d.Project),
 		Body: &oxide.InstanceCreate{
-			AntiAffinityGroups: []oxide.NameOrId{}, // Cannot be unset due to bug: https://github.com/oxidecomputer/oxide.go/issues/282
+			AntiAffinityGroups: antiAffinityGroups,
 			BootDisk: &oxide.InstanceDiskAttachment{
 				Description: defaultDescription,
 				DiskSource: oxide.DiskSource{
@@ -353,6 +363,12 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			Name:   flagAdditionalSSHPublicKeyIDs,
 			Usage:  "Additional SSH public keys IDs to inject into the instance.",
 			EnvVar: "OXIDE_ADDITIONAL_SSH_PUBLIC_KEY_IDS",
+		},
+
+		// Anti-affinity groups.
+		mcnflag.StringSliceFlag{
+			Name:  flagAntiAffinityGroup,
+			Usage: "Anti-affinity groups the instance will be a member of. The values can be IDs or names of anti-affinity groups.",
 		},
 	}
 }
@@ -519,6 +535,7 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 	d.UserDataFile = opts.String(flagUserDataFile)
 	d.SSHUser = opts.String(flagSSHUser)
 	d.AdditionalSSHPublicKeyIDs = opts.StringSlice(flagAdditionalSSHPublicKeyIDs)
+	d.AntiAffinityGroups = opts.StringSlice(flagAntiAffinityGroup)
 	d.SSHPort = defaultSSHPort
 
 	// Required flags.
