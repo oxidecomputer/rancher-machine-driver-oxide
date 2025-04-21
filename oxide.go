@@ -33,21 +33,22 @@ const (
 )
 
 const (
-	flagHost                      = "oxide-host"
-	flagToken                     = "oxide-token"
-	flagProject                   = "oxide-project"
-	flagVCPUs                     = "oxide-vcpus"
-	flagMemory                    = "oxide-memory"
-	flagBootDiskSize              = "oxide-boot-disk-size"
-	flagBootDiskImageID           = "oxide-boot-disk-image-id"
-	flagAdditionalDisks           = "oxide-additional-disks-sizes"
-	flagVPC                       = "oxide-vpc"
-	flagSubnet                    = "oxide-subnet"
-	flagUserDataFile              = "oxide-user-data-file"
-	flagSSHUser                   = "oxide-ssh-user"
-	flagAdditionalSSHPublicKeyIDs = "oxide-additional-ssh-public-key-ids"
-	flagAntiAffinityGroup         = "oxide-anti-affinity-group"
-	flagExternalIP                = "oxide-external-ip"
+	flagHost              = "oxide-host"
+	flagToken             = "oxide-token"
+	flagProject           = "oxide-project"
+	flagVCPUs             = "oxide-vcpus"
+	flagMemory            = "oxide-memory"
+	flagBootDiskSize      = "oxide-boot-disk-size"
+	flagBootDiskImageID   = "oxide-boot-disk-image-id"
+	flagAdditionalDisk    = "oxide-additional-disk"
+	flagVPC               = "oxide-vpc"
+	flagSubnet            = "oxide-subnet"
+	flagUserDataFile      = "oxide-user-data-file"
+	flagSSHUser           = "oxide-ssh-user"
+	flagSSHPublicKey      = "oxide-ssh-public-key"
+	flagAntiAffinityGroup = "oxide-anti-affinity-group"
+	flagEphemeralIPAttach = "oxide-ephemeral-ip-attach"
+	flagEphemeralIPPool   = "oxide-ephemeral-ip-pool"
 )
 
 // make sure Driver implements the drivers.Driver interface.
@@ -88,14 +89,17 @@ type Driver struct {
 	// Subnet for the instance.
 	Subnet string
 
-	// External IPs to attach to the instance.
-	ExternalIPs []ExternalIP
+	// Should an ephemeralIP be assigned to the instance
+	EphemeralIPAttach bool
+
+	// pool for the ephemeral IP
+	EphemeralIPPool string
 
 	// Path to file containing user data for the instance.
 	UserDataFile string
 
-	// Additional SSH public keys to inject into the instance.
-	AdditionalSSHPublicKeyIDs []string
+	// Additional SSH public keys Name or ID to inject into the instance.
+	SSHPublicKeys []string
 
 	// Anti-affinity groups the instance will be a member of. The values can be IDs
 	// or names of anti-affinity groups.
@@ -165,11 +169,11 @@ func (d *Driver) Create() error {
 
 	d.SSHPublicKeyID = pubKey.Id
 
-	sshPublicKeyIDs := []oxide.NameOrId{
+	sshPublicKeys := []oxide.NameOrId{
 		oxide.NameOrId(d.SSHPublicKeyID),
 	}
-	for _, additionalSSHPublicKeyID := range d.AdditionalSSHPublicKeyIDs {
-		sshPublicKeyIDs = append(sshPublicKeyIDs, oxide.NameOrId(additionalSSHPublicKeyID))
+	for _, sshPubKey := range d.SSHPublicKeys {
+		sshPublicKeys = append(sshPublicKeys, oxide.NameOrId(sshPubKey))
 	}
 
 	var userData []byte
@@ -200,22 +204,15 @@ func (d *Driver) Create() error {
 		antiAffinityGroups = append(antiAffinityGroups, oxide.NameOrId(antiAffinityGroup))
 	}
 
-	externalIPs := make([]oxide.ExternalIpCreate, len(d.ExternalIPs))
-	for i, externalIP := range d.ExternalIPs {
-		switch strings.ToLower(externalIP.Type) {
-		case "ephemeral":
-			externalIPs[i] = oxide.ExternalIpCreate{
-				Type: oxide.ExternalIpCreateTypeEphemeral,
-				Pool: oxide.NameOrId(externalIP.NameOrID),
-			}
-		case "floating":
-			externalIPs[i] = oxide.ExternalIpCreate{
-				Type:       oxide.ExternalIpCreateTypeFloating,
-				FloatingIp: oxide.NameOrId(externalIP.NameOrID),
-			}
-		default:
-			return fmt.Errorf("invalid external ip type %q", externalIP.Type)
+	externalIPs := make([]oxide.ExternalIpCreate, 0, 1)
+	if d.EphemeralIPAttach {
+		extIp := oxide.ExternalIpCreate{
+			Type: oxide.ExternalIpCreateTypeEphemeral,
 		}
+		if d.EphemeralIPPool != "" {
+			extIp.Pool = oxide.NameOrId(d.EphemeralIPPool)
+		}
+		externalIPs = append(externalIPs, extIp)
 	}
 
 	icp := oxide.InstanceCreateParams{
@@ -250,7 +247,7 @@ func (d *Driver) Create() error {
 				},
 				Type: oxide.InstanceNetworkInterfaceAttachmentTypeCreate,
 			},
-			SshPublicKeys: sshPublicKeyIDs,
+			SshPublicKeys: sshPublicKeys,
 			UserData:      base64.StdEncoding.EncodeToString(userData),
 		},
 	}
@@ -346,10 +343,8 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 		},
 
 		// Additional disks.
-		// TODO: Breaking change since current names are already in production.
-		// Rename flag to `oxide-additional-disk` to accurately reflect content.
 		mcnflag.StringSliceFlag{
-			Name:  flagAdditionalDisks,
+			Name:  flagAdditionalDisk,
 			Usage: "Additional disks to attach to the instance in the format `SIZE[,LABEL]` where `SIZE` is the disk size in bytes and `LABEL` is an arbitrary string used within the disk name for identification. `SIZE` supports a unit suffix (e.g., 20 GiB).",
 		},
 
@@ -366,9 +361,16 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			EnvVar: "OXIDE_SUBNET",
 			Value:  "default",
 		},
-		mcnflag.StringSliceFlag{
-			Name:  flagExternalIP,
-			Usage: "External IPs to attach to the instance in the format `TYPE,NAME_OR_ID` where `TYPE` is either `ephemeral` or `floating` and `NAME_OR_ID` is the name or ID of an existing IP pool when `TYPE` is `ephemeral` or an existing floating IP when `TYPE` is `floating`.",
+		mcnflag.BoolFlag{
+			Name:   flagEphemeralIPAttach,
+			Usage:  "Should an ephemeral IP address be allocated for the instance.",
+			EnvVar: "OXIDE_EPHEMERAL_IP_ATTACH",
+		},
+		mcnflag.StringFlag{
+			Name:   flagEphemeralIPPool,
+			Usage:  "ephemeral IP pool that should be used for the instance or empty string to use the default (only used if oxide-ephemeral-ip is true)",
+			EnvVar: "OXIDE_EPHEMERAL_IP_POOL",
+			Value:  "",
 		},
 
 		// User data.
@@ -385,7 +387,7 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			EnvVar: "OXIDE_SSH_USER",
 		},
 		mcnflag.StringSliceFlag{
-			Name:   flagAdditionalSSHPublicKeyIDs,
+			Name:   flagSSHPublicKey,
 			Usage:  "Additional SSH public keys IDs to inject into the instance.",
 			EnvVar: "OXIDE_ADDITIONAL_SSH_PUBLIC_KEY_IDS",
 		},
@@ -559,9 +561,11 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 	d.Subnet = opts.String(flagSubnet)
 	d.UserDataFile = opts.String(flagUserDataFile)
 	d.SSHUser = opts.String(flagSSHUser)
-	d.AdditionalSSHPublicKeyIDs = opts.StringSlice(flagAdditionalSSHPublicKeyIDs)
+	d.SSHPublicKeys = opts.StringSlice(flagSSHPublicKey)
 	d.AntiAffinityGroups = opts.StringSlice(flagAntiAffinityGroup)
 	d.SSHPort = defaultSSHPort
+	d.EphemeralIPAttach = opts.Bool(flagEphemeralIPAttach)
+	d.EphemeralIPPool = opts.String(flagEphemeralIPPool)
 
 	// Required flags.
 	{
@@ -614,31 +618,12 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 		d.BootDiskSize = bootDiskSize
 
 		d.AdditionalDisks = make([]AdditionalDisk, 0)
-		for _, diskInfo := range opts.StringSlice(flagAdditionalDisks) {
+		for _, diskInfo := range opts.StringSlice(flagAdditionalDisk) {
 			additionalDisk, err := ParseAdditionalDisk(diskInfo)
 			if err != nil {
-				joinedParseErr = errors.Join(joinedParseErr, NewFlagParseError(flagAdditionalDisks, err))
+				joinedParseErr = errors.Join(joinedParseErr, NewFlagParseError(flagAdditionalDisk, err))
 			}
 			d.AdditionalDisks = append(d.AdditionalDisks, additionalDisk)
-		}
-
-		d.ExternalIPs = make([]ExternalIP, 0)
-		for _, externalIPStr := range opts.StringSlice(flagExternalIP) {
-			externalIP, err := ParseExternalIP(externalIPStr)
-			if err != nil {
-				joinedParseErr = errors.Join(joinedParseErr, NewFlagParseError(flagExternalIP, err))
-			}
-			d.ExternalIPs = append(d.ExternalIPs, externalIP)
-		}
-
-		// Ensure there's at most one external IP of type `ephemeral`.
-		externalIPTypes := make(map[string]struct{})
-		for _, externalIP := range d.ExternalIPs {
-			if _, ok := externalIPTypes[externalIP.Type]; ok && externalIP.Type == "ephemeral" {
-				joinedParseErr = errors.Join(joinedParseErr, NewFlagParseError(flagExternalIP, fmt.Errorf("only one external ip of type 'ephemeral' allowed")))
-				break
-			}
-			externalIPTypes[externalIP.Type] = struct{}{}
 		}
 
 		if joinedParseErr != nil {
@@ -801,42 +786,4 @@ func ParseAdditionalDisk(s string) (AdditionalDisk, error) {
 // Name returns a string representing the disk name.
 func (a AdditionalDisk) Name(machineName string, diskNumber int) string {
 	return fmt.Sprintf("disk-%02d-%s-%s", diskNumber, a.Label, machineName)
-}
-
-// ExternalIP represents an external IP attached to an instance.
-type ExternalIP struct {
-	// External IP type. One of `ephemeral` or `floating`.
-	Type string
-
-	// Name or ID of an existing IP pool (`ephemeral`) or floating IP (`floating`).
-	NameOrID string
-}
-
-// ParseExternalIP parses an `ExternalIP` from a string in the format
-// `TYPE,NAME_OR_ID` where `TYPE` is either `ephemeral` or `floating` and
-// `NAME_OR_ID` is the name or ID of an existing IP pool when `TYPE` is
-// `ephemeral` or an existing floating IP when `TYPE` is `floating`.
-func ParseExternalIP(s string) (ExternalIP, error) {
-	fields := strings.Split(s, ",")
-
-	if len(fields) != 2 {
-		return ExternalIP{}, fmt.Errorf("invalid external ip format %q, format must be type,name_or_id", s)
-	}
-
-	ipType := strings.ToLower(fields[0])
-	if ipType != "ephemeral" && ipType != "floating" {
-		return ExternalIP{}, fmt.Errorf("invalid external ip type %q, must be one of 'ephemeral' or 'floating'", ipType)
-	}
-
-	nameOrID := fields[1]
-	if nameOrID == "" {
-		return ExternalIP{}, fmt.Errorf("invalid external ip name_or_id, name_or_id must be provided")
-	}
-
-	e := ExternalIP{
-		Type:     ipType,
-		NameOrID: nameOrID,
-	}
-
-	return e, nil
 }
