@@ -24,7 +24,7 @@ builds:
 
 archives:
   - formats:
-      - tar.gz
+      - binary
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
