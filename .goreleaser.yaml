@@ -5,15 +5,18 @@ before:
   hooks:
     - go mod tidy
 
+# We build only a linux/amd64 binary for two reasons.
+#   1. That's all that Rancher supports.
+#   2. Users configure Rancher to download the binary directly from GitHub
+#      release assets and GitHub release assets only supports files, not
+#      folders, so there can only be one `docker-machine-driver-oxide` file.
 builds:
   - env:
       - CGO_ENABLED=0
     goos:
-      - darwin
       - linux
     goarch:
       - amd64
-      - arm64
     # Rancher expects the node driver binary to be in the format
     # docker-machine-driver-*.
     binary: docker-machine-driver-oxide
@@ -25,7 +28,7 @@ builds:
 archives:
   - formats:
       - binary
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "{{ .Binary }}"
 
 checksum:
-  name_template: "{{ .ProjectName }}_SHA256SUMS"
+  name_template: "{{ .Binary }}_SHA256SUMS"
