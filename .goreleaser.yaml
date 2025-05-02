@@ -31,4 +31,5 @@ archives:
     name_template: "{{ .Binary }}"
 
 checksum:
-  name_template: "{{ .Binary }}_SHA256SUMS"
+  name_template: "{{ .ArtifactName }}_SHA256SUMS"
+  split: true
