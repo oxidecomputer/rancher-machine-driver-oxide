@@ -46,6 +46,7 @@ const (
 	flagUserDataFile      = "oxide-user-data-file"
 	flagSSHUser           = "oxide-ssh-user"
 	flagSSHPublicKey      = "oxide-ssh-public-key"
+	flagSSHUseExternalIP  = "oxide-ssh-use-external-ip"
 	flagAntiAffinityGroup = "oxide-anti-affinity-group"
 	flagEphemeralIPAttach = "oxide-ephemeral-ip-attach"
 	flagEphemeralIPPool   = "oxide-ephemeral-ip-pool"
@@ -100,6 +101,9 @@ type Driver struct {
 
 	// Additional SSH public keys Name or ID to inject into the instance.
 	SSHPublicKeys []string
+
+	// Whether to use the external IP for SSH access to the instance.
+	SSHUseExternalIP bool
 
 	// Anti-affinity groups the instance will be a member of. The values can be IDs
 	// or names of anti-affinity groups.
@@ -272,6 +276,21 @@ func (d *Driver) Create() error {
 	}
 	d.IPAddress = networkInterfaces[0].Ip
 
+	if d.SSHUseExternalIP {
+		externalIPs, err := d.oxideClient.InstanceExternalIpList(context.TODO(), oxide.InstanceExternalIpListParams{
+			Instance: oxide.NameOrId(d.InstanceID),
+		})
+		if err != nil {
+			return fmt.Errorf("failed listing external ips for instance: %w", err)
+		}
+
+		if len(externalIPs.Items) == 0 {
+			return errors.New("instance has no external ips but ssh over external ip was requested")
+		}
+
+		d.IPAddress = externalIPs.Items[0].Ip
+	}
+
 	additionalDisks, err := d.oxideClient.InstanceDiskListAllPages(context.TODO(), oxide.InstanceDiskListParams{
 		Instance: oxide.NameOrId(d.InstanceID),
 	})
@@ -390,6 +409,11 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			Name:   flagSSHPublicKey,
 			Usage:  "Additional SSH public keys IDs to inject into the instance.",
 			EnvVar: "OXIDE_ADDITIONAL_SSH_PUBLIC_KEY_IDS",
+		},
+		mcnflag.BoolFlag{
+			Name:   flagSSHUseExternalIP,
+			Usage:  "Whether to use the external IP for SSH access to the instance.",
+			EnvVar: "OXIDE_SSH_USE_EXTERNAL_IP",
 		},
 
 		// Anti-affinity groups.
@@ -562,6 +586,7 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 	d.UserDataFile = opts.String(flagUserDataFile)
 	d.SSHUser = opts.String(flagSSHUser)
 	d.SSHPublicKeys = opts.StringSlice(flagSSHPublicKey)
+	d.SSHUseExternalIP = opts.Bool(flagSSHUseExternalIP)
 	d.AntiAffinityGroups = opts.StringSlice(flagAntiAffinityGroup)
 	d.SSHPort = defaultSSHPort
 	d.EphemeralIPAttach = opts.Bool(flagEphemeralIPAttach)
