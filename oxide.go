@@ -43,6 +43,7 @@ const (
 	flagAdditionalDisk    = "oxide-additional-disk"
 	flagVPC               = "oxide-vpc"
 	flagSubnet            = "oxide-subnet"
+	flagNICIP             = "oxide-nic-ip"
 	flagUserDataFile      = "oxide-user-data-file"
 	flagSSHUser           = "oxide-ssh-user"
 	flagSSHPublicKey      = "oxide-ssh-public-key"
@@ -88,6 +89,9 @@ type Driver struct {
 
 	// Subnet for the instance.
 	Subnet string
+
+	// IP address for the network interface.
+	NICIP string
 
 	// Should an ephemeralIP be assigned to the instance
 	EphemeralIPAttach bool
@@ -243,6 +247,7 @@ func (d *Driver) Create() error {
 						Name:        oxide.Name("nic-" + d.GetMachineName()),
 						SubnetName:  oxide.Name(d.Subnet),
 						VpcName:     oxide.Name(d.VPC),
+						Ip:          d.NICIP,
 					},
 				},
 				Type: oxide.InstanceNetworkInterfaceAttachmentTypeCreate,
@@ -360,6 +365,11 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			Usage:  "Subnet name for the instance's network interface.",
 			EnvVar: "OXIDE_SUBNET",
 			Value:  "default",
+		},
+		mcnflag.StringFlag{
+			Name:   flagNICIP,
+			Usage:  "IP address for the instance's network interface.",
+			EnvVar: "OXIDE_NIC_IP",
 		},
 		mcnflag.BoolFlag{
 			Name:   flagEphemeralIPAttach,
@@ -559,6 +569,7 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 	d.BootDiskImageID = opts.String(flagBootDiskImageID)
 	d.VPC = opts.String(flagVPC)
 	d.Subnet = opts.String(flagSubnet)
+	d.NICIP = opts.String(flagNICIP)
 	d.UserDataFile = opts.String(flagUserDataFile)
 	d.SSHUser = opts.String(flagSSHUser)
 	d.SSHPublicKeys = opts.StringSlice(flagSSHPublicKey)
