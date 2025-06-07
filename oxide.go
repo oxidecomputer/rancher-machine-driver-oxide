@@ -49,6 +49,7 @@ const (
 	flagAntiAffinityGroup = "oxide-anti-affinity-group"
 	flagEphemeralIPAttach = "oxide-ephemeral-ip-attach"
 	flagEphemeralIPPool   = "oxide-ephemeral-ip-pool"
+	flagUserAgent         = "oxide-user-agent"
 )
 
 // make sure Driver implements the drivers.Driver interface.
@@ -108,6 +109,9 @@ type Driver struct {
 	// Additional disks to attach to the instance.
 	AdditionalDisks []AdditionalDisk
 
+	// Custom user agent string for API requests.
+	UserAgent string
+
 	// ID of the created instance. Used to retrieve instance state during
 	// `GetState` and to delete the instance during `Remove`.
 	InstanceID string
@@ -145,7 +149,7 @@ func (d *Driver) createOxideClient() (*oxide.Client, error) {
 	return oxide.NewClient(&oxide.Config{
 		Host:      d.Host,
 		Token:     d.Token,
-		UserAgent: "Oxide Rancher Machine Driver/0.0.1 (Go; Linux) [Environment: Development]",
+		UserAgent: d.UserAgent,
 	})
 }
 
@@ -397,6 +401,14 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			Name:  flagAntiAffinityGroup,
 			Usage: "Anti-affinity groups the instance will be a member of. The values can be IDs or names of anti-affinity groups.",
 		},
+
+		// User agent.
+		mcnflag.StringFlag{
+			Name:   flagUserAgent,
+			Usage:  "Custom user agent string for API requests.",
+			EnvVar: "OXIDE_USER_AGENT",
+			Value:  "Oxide Rancher Machine Driver",
+		},
 	}
 }
 
@@ -566,6 +578,7 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 	d.SSHPort = defaultSSHPort
 	d.EphemeralIPAttach = opts.Bool(flagEphemeralIPAttach)
 	d.EphemeralIPPool = opts.String(flagEphemeralIPPool)
+	d.UserAgent = opts.String(flagUserAgent)
 
 	// Required flags.
 	{
