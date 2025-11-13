@@ -1,6 +1,6 @@
 module github.com/oxidecomputer/rancher-machine-driver-oxide
 
-go 1.23.6
+go 1.24.3
 
 replace (
 	github.com/docker/docker => github.com/moby/moby v1.4.2-0.20170731201646-1009e6a40b29
@@ -11,7 +11,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1
 	github.com/onsi/ginkgo/v2 v2.22.0
 	github.com/onsi/gomega v1.36.1
-	github.com/oxidecomputer/oxide.go v0.4.0
+	github.com/oxidecomputer/oxide.go v0.7.0
 	github.com/rancher/machine v0.15.0-rancher122
 )
 
