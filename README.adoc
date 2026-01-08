@@ -45,6 +45,7 @@ metadata:
   annotations:
     privateCredentialFields: token
     publicCredentialFields: host
+    nodedriver.cattle.io/file-to-field-aliases: "userDataFile:userDataFile"
   finalizers:
   - controller.cattle.io/node-driver-controller
 spec:
