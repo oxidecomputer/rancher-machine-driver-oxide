@@ -216,17 +216,23 @@ func (d *Driver) Create() error {
 
 	externalIPs := make([]oxide.ExternalIpCreate, 0, 1)
 	if d.EphemeralIPAttach {
-		extIp := oxide.ExternalIpCreate{
+		extIP := oxide.ExternalIpCreate{
 			Type: oxide.ExternalIpCreateTypeEphemeral,
 		}
+
 		if d.EphemeralIPPool != "" {
-			extIp.PoolSelector = oxide.PoolSelector{
-				Type:      oxide.PoolSelectorTypeExplicit,
-				Pool:      oxide.NameOrId(d.EphemeralIPPool),
+			extIP.PoolSelector = oxide.PoolSelector{
+				Type: oxide.PoolSelectorTypeExplicit,
+				Pool: oxide.NameOrId(d.EphemeralIPPool),
+			}
+		} else {
+			extIP.PoolSelector = oxide.PoolSelector{
+				Type:      oxide.PoolSelectorTypeAuto,
 				IpVersion: oxide.IpVersionV4,
 			}
 		}
-		externalIPs = append(externalIPs, extIp)
+
+		externalIPs = append(externalIPs, extIP)
 	}
 
 	icp := oxide.InstanceCreateParams{
