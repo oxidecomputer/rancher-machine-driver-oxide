@@ -146,11 +146,14 @@ func newDriver(machineName, storePath string) *Driver {
 // createOxideClient creates an Oxide client from the machine driver
 // configuration.
 func (d *Driver) createOxideClient() (*oxide.Client, error) {
-	return oxide.NewClient(&oxide.Config{
-		Host:      d.Host,
-		Token:     d.Token,
-		UserAgent: d.UserAgent,
-	})
+	opts := []oxide.ClientOption{
+		oxide.WithHost(d.Host),
+		oxide.WithToken(d.Token),
+	}
+	if d.UserAgent != "" {
+		opts = append(opts, oxide.WithUserAgent(d.UserAgent))
+	}
+	return oxide.NewClient(opts...)
 }
 
 // Create creates the instance and any necessary dependencies (e.g., SSH keys,
@@ -193,9 +196,12 @@ func (d *Driver) Create() error {
 	for i, additionalDisk := range d.AdditionalDisks {
 		disks[i] = oxide.InstanceDiskAttachment{
 			Description: defaultDescription,
-			DiskSource: oxide.DiskSource{
-				BlockSize: oxide.BlockSize(4096),
-				Type:      oxide.DiskSourceTypeBlank,
+			DiskBackend: oxide.DiskBackend{
+				Type: oxide.DiskBackendTypeDistributed,
+				DiskSource: oxide.DiskSource{
+					BlockSize: oxide.BlockSize(4096),
+					Type:      oxide.DiskSourceTypeBlank,
+				},
 			},
 			Name: oxide.Name(additionalDisk.Name(d.MachineName, i)),
 			Size: oxide.ByteCount(additionalDisk.Size),
@@ -214,7 +220,11 @@ func (d *Driver) Create() error {
 			Type: oxide.ExternalIpCreateTypeEphemeral,
 		}
 		if d.EphemeralIPPool != "" {
-			extIp.Pool = oxide.NameOrId(d.EphemeralIPPool)
+			extIp.PoolSelector = oxide.PoolSelector{
+				Type:      oxide.PoolSelectorTypeExplicit,
+				Pool:      oxide.NameOrId(d.EphemeralIPPool),
+				IpVersion: oxide.IpVersionV4,
+			}
 		}
 		externalIPs = append(externalIPs, extIp)
 	}
@@ -225,9 +235,12 @@ func (d *Driver) Create() error {
 			AntiAffinityGroups: antiAffinityGroups,
 			BootDisk: &oxide.InstanceDiskAttachment{
 				Description: defaultDescription,
-				DiskSource: oxide.DiskSource{
-					Type:    oxide.DiskSourceTypeImage,
-					ImageId: d.BootDiskImageID,
+				DiskBackend: oxide.DiskBackend{
+					Type: oxide.DiskBackendTypeDistributed,
+					DiskSource: oxide.DiskSource{
+						Type:    oxide.DiskSourceTypeImage,
+						ImageId: d.BootDiskImageID,
+					},
 				},
 				Name: oxide.Name("disk-" + d.GetMachineName()),
 				Size: oxide.ByteCount(d.BootDiskSize),
@@ -247,6 +260,15 @@ func (d *Driver) Create() error {
 						Name:        oxide.Name("nic-" + d.GetMachineName()),
 						SubnetName:  oxide.Name(d.Subnet),
 						VpcName:     oxide.Name(d.VPC),
+						IpConfig: oxide.PrivateIpStackCreate{
+							Value: &oxide.PrivateIpStackCreateV4{
+								Value: oxide.PrivateIpv4StackCreate{
+									Ip: oxide.Ipv4Assignment{
+										Type: oxide.Ipv4AssignmentTypeAuto,
+									},
+								},
+							},
+						},
 					},
 				},
 				Type: oxide.InstanceNetworkInterfaceAttachmentTypeCreate,
@@ -274,7 +296,22 @@ func (d *Driver) Create() error {
 	if len(networkInterfaces) == 0 {
 		return errors.New("no valid network interfaces found")
 	}
-	d.IPAddress = networkInterfaces[0].Ip
+
+	nic := networkInterfaces[0]
+	switch v := nic.IpStack.Value.(type) {
+	case oxide.PrivateIpStackV4:
+		d.IPAddress = v.Value.Ip
+	case *oxide.PrivateIpStackV4:
+		d.IPAddress = v.Value.Ip
+	case oxide.PrivateIpStackDualStack:
+		d.IPAddress = v.Value.V4.Ip
+	case *oxide.PrivateIpStackDualStack:
+		d.IPAddress = v.Value.V4.Ip
+	default:
+		return errors.New(
+			"no IPv4 address found on network interface",
+		)
+	}
 
 	additionalDisks, err := d.oxideClient.InstanceDiskListAllPages(context.TODO(), oxide.InstanceDiskListParams{
 		Instance: oxide.NameOrId(d.InstanceID),
