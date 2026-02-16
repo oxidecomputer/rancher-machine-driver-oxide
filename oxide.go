@@ -47,6 +47,7 @@ const (
 	flagSSHUser           = "oxide-ssh-user"
 	flagSSHPublicKey      = "oxide-ssh-public-key"
 	flagAntiAffinityGroup = "oxide-anti-affinity-group"
+	flagDeleteAdditionalDisks = "oxide-delete-additional-disks"
 	flagEphemeralIPAttach = "oxide-ephemeral-ip-attach"
 	flagEphemeralIPPool   = "oxide-ephemeral-ip-pool"
 	flagUserAgent         = "oxide-user-agent"
@@ -105,6 +106,9 @@ type Driver struct {
 	// Anti-affinity groups the instance will be a member of. The values can be IDs
 	// or names of anti-affinity groups.
 	AntiAffinityGroups []string
+
+	// Whether to delete additional disks when the instance is deleted.
+	DeleteAdditionalDisks bool
 
 	// Additional disks to attach to the instance.
 	AdditionalDisks []AdditionalDisk
@@ -394,6 +398,11 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			Name:  flagAdditionalDisk,
 			Usage: "Additional disks to attach to the instance in the format `SIZE[,LABEL]` where `SIZE` is the disk size in bytes and `LABEL` is an arbitrary string used within the disk name for identification. `SIZE` supports a unit suffix (e.g., 20 GiB).",
 		},
+		mcnflag.BoolFlag{
+			Name:   flagDeleteAdditionalDisks,
+			Usage:  "Delete additional disks when the instance is deleted.",
+			EnvVar: "OXIDE_DELETE_ADDITIONAL_DISKS",
+		},
 
 		// Networking.
 		mcnflag.StringFlag{
@@ -573,11 +582,13 @@ func (d *Driver) Remove() error {
 		return err
 	}
 
-	for _, additionalDiskID := range d.AdditionalDiskIDs {
-		if err := d.oxideClient.DiskDelete(context.TODO(), oxide.DiskDeleteParams{
-			Disk: oxide.NameOrId(additionalDiskID),
-		}); err != nil {
-			return err
+	if d.DeleteAdditionalDisks {
+		for _, additionalDiskID := range d.AdditionalDiskIDs {
+			if err := d.oxideClient.DiskDelete(context.TODO(), oxide.DiskDeleteParams{
+				Disk: oxide.NameOrId(additionalDiskID),
+			}); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -619,6 +630,7 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 	d.SSHPublicKeys = opts.StringSlice(flagSSHPublicKey)
 	d.AntiAffinityGroups = opts.StringSlice(flagAntiAffinityGroup)
 	d.SSHPort = defaultSSHPort
+	d.DeleteAdditionalDisks = opts.Bool(flagDeleteAdditionalDisks)
 	d.EphemeralIPAttach = opts.Bool(flagEphemeralIPAttach)
 	d.EphemeralIPPool = opts.String(flagEphemeralIPPool)
 	d.UserAgent = opts.String(flagUserAgent)
