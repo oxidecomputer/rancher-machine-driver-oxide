@@ -195,17 +195,20 @@ func (d *Driver) Create() error {
 	disks := make([]oxide.InstanceDiskAttachment, len(d.AdditionalDisks))
 	for i, additionalDisk := range d.AdditionalDisks {
 		disks[i] = oxide.InstanceDiskAttachment{
-			Description: defaultDescription,
-			DiskBackend: oxide.DiskBackend{
-				Type: oxide.DiskBackendTypeDistributed,
-				DiskSource: oxide.DiskSource{
-					BlockSize: oxide.BlockSize(4096),
-					Type:      oxide.DiskSourceTypeBlank,
+			Value: &oxide.InstanceDiskAttachmentCreate{
+				Description: defaultDescription,
+				DiskBackend: oxide.DiskBackend{
+					Value: &oxide.DiskBackendDistributed{
+						DiskSource: oxide.DiskSource{
+							Value: &oxide.DiskSourceBlank{
+								BlockSize: oxide.BlockSize(4096),
+							},
+						},
+					},
 				},
+				Name: oxide.Name(additionalDisk.Name(d.MachineName, i)),
+				Size: oxide.ByteCount(additionalDisk.Size),
 			},
-			Name: oxide.Name(additionalDisk.Name(d.MachineName, i)),
-			Size: oxide.ByteCount(additionalDisk.Size),
-			Type: oxide.InstanceDiskAttachmentTypeCreate,
 		}
 	}
 
@@ -216,22 +219,26 @@ func (d *Driver) Create() error {
 
 	externalIPs := make([]oxide.ExternalIpCreate, 0, 1)
 	if d.EphemeralIPAttach {
-		extIP := oxide.ExternalIpCreate{
-			Type: oxide.ExternalIpCreateTypeEphemeral,
-		}
-
+		var poolSelector oxide.PoolSelector
 		if d.EphemeralIPPool != "" {
-			extIP.PoolSelector = oxide.PoolSelector{
-				Type: oxide.PoolSelectorTypeExplicit,
-				Pool: oxide.NameOrId(d.EphemeralIPPool),
+			poolSelector = oxide.PoolSelector{
+				Value: &oxide.PoolSelectorExplicit{
+					Pool: oxide.NameOrId(d.EphemeralIPPool),
+				},
 			}
 		} else {
-			extIP.PoolSelector = oxide.PoolSelector{
-				Type:      oxide.PoolSelectorTypeAuto,
-				IpVersion: oxide.IpVersionV4,
+			poolSelector = oxide.PoolSelector{
+				Value: &oxide.PoolSelectorAuto{
+					IpVersion: oxide.IpVersionV4,
+				},
 			}
 		}
 
+		extIP := oxide.ExternalIpCreate{
+			Value: &oxide.ExternalIpCreateEphemeral{
+				PoolSelector: poolSelector,
+			},
+		}
 		externalIPs = append(externalIPs, extIP)
 	}
 
@@ -239,18 +246,21 @@ func (d *Driver) Create() error {
 		Project: oxide.NameOrId(d.Project),
 		Body: &oxide.InstanceCreate{
 			AntiAffinityGroups: antiAffinityGroups,
-			BootDisk: &oxide.InstanceDiskAttachment{
-				Description: defaultDescription,
-				DiskBackend: oxide.DiskBackend{
-					Type: oxide.DiskBackendTypeDistributed,
-					DiskSource: oxide.DiskSource{
-						Type:    oxide.DiskSourceTypeImage,
-						ImageId: d.BootDiskImageID,
+			BootDisk: oxide.InstanceDiskAttachment{
+				Value: &oxide.InstanceDiskAttachmentCreate{
+					Description: defaultDescription,
+					DiskBackend: oxide.DiskBackend{
+						Value: &oxide.DiskBackendDistributed{
+							DiskSource: oxide.DiskSource{
+								Value: &oxide.DiskSourceImage{
+									ImageId: d.BootDiskImageID,
+								},
+							},
+						},
 					},
+					Name: oxide.Name("disk-" + d.GetMachineName()),
+					Size: oxide.ByteCount(d.BootDiskSize),
 				},
-				Name: oxide.Name("disk-" + d.GetMachineName()),
-				Size: oxide.ByteCount(d.BootDiskSize),
-				Type: oxide.InstanceDiskAttachmentTypeCreate,
 			},
 			Disks:       disks,
 			Description: defaultDescription,
@@ -260,24 +270,25 @@ func (d *Driver) Create() error {
 			Name:        oxide.Name(d.GetMachineName()),
 			Ncpus:       oxide.InstanceCpuCount(d.VCPUS),
 			NetworkInterfaces: oxide.InstanceNetworkInterfaceAttachment{
-				Params: []oxide.InstanceNetworkInterfaceCreate{
-					{
-						Description: defaultDescription,
-						Name:        oxide.Name("nic-" + d.GetMachineName()),
-						SubnetName:  oxide.Name(d.Subnet),
-						VpcName:     oxide.Name(d.VPC),
-						IpConfig: oxide.PrivateIpStackCreate{
-							Value: &oxide.PrivateIpStackCreateV4{
-								Value: oxide.PrivateIpv4StackCreate{
-									Ip: oxide.Ipv4Assignment{
-										Type: oxide.Ipv4AssignmentTypeAuto,
+				Value: &oxide.InstanceNetworkInterfaceAttachmentCreate{
+					Params: []oxide.InstanceNetworkInterfaceCreate{
+						{
+							Description: defaultDescription,
+							Name:        oxide.Name("nic-" + d.GetMachineName()),
+							SubnetName:  oxide.Name(d.Subnet),
+							VpcName:     oxide.Name(d.VPC),
+							IpConfig: oxide.PrivateIpStackCreate{
+								Value: &oxide.PrivateIpStackCreateV4{
+									Value: oxide.PrivateIpv4StackCreate{
+										Ip: oxide.Ipv4Assignment{
+											Value: &oxide.Ipv4AssignmentAuto{},
+										},
 									},
 								},
 							},
 						},
 					},
 				},
-				Type: oxide.InstanceNetworkInterfaceAttachmentTypeCreate,
 			},
 			SshPublicKeys: sshPublicKeys,
 			UserData:      base64.StdEncoding.EncodeToString(userData),
