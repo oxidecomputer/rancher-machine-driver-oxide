@@ -11,7 +11,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1
 	github.com/onsi/ginkgo/v2 v2.22.0
 	github.com/onsi/gomega v1.36.1
-	github.com/oxidecomputer/oxide.go v0.8.0
+	github.com/oxidecomputer/oxide.go v0.9.0
 	github.com/rancher/machine v0.15.0-rancher122
 )
 
