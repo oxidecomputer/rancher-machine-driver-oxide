@@ -17,7 +17,13 @@ $(BINDIR):
 
 .PHONY: test
 test:
-	$(GO) test -cover -v ./...
+	ginkgo --cover --output-dir=build  ./...
+
+.PHONY: cover
+cover: test
+	$(GO) tool cover \
+          -html=build/coverprofile.out \
+	  -o build/index.html
 
 .PHONY: clean
 clean:

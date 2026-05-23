@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/dustin/go-humanize"
@@ -107,7 +106,7 @@ type Driver struct {
 	AntiAffinityGroups []string
 
 	// Additional disks to attach to the instance.
-	AdditionalDisks []AdditionalDisk
+	additionalDisks []additionalDisk
 
 	// Custom user agent string for API requests.
 	UserAgent string
@@ -192,24 +191,9 @@ func (d *Driver) Create() error {
 		userData = b
 	}
 
-	disks := make([]oxide.InstanceDiskAttachment, len(d.AdditionalDisks))
-	for i, additionalDisk := range d.AdditionalDisks {
-		disks[i] = oxide.InstanceDiskAttachment{
-			Value: &oxide.InstanceDiskAttachmentCreate{
-				Description: defaultDescription,
-				DiskBackend: oxide.DiskBackend{
-					Value: &oxide.DiskBackendDistributed{
-						DiskSource: oxide.DiskSource{
-							Value: &oxide.DiskSourceBlank{
-								BlockSize: oxide.BlockSize(4096),
-							},
-						},
-					},
-				},
-				Name: oxide.Name(additionalDisk.Name(d.MachineName, i)),
-				Size: oxide.ByteCount(additionalDisk.Size),
-			},
-		}
+	disks := make([]oxide.InstanceDiskAttachment, len(d.additionalDisks))
+	for i, aDisk := range d.additionalDisks {
+		disks[i] = aDisk.createInstanceDiskAttachment(i, d.MachineName)
 	}
 
 	antiAffinityGroups := make([]oxide.NameOrId, 0, len(d.AntiAffinityGroups))
@@ -337,7 +321,7 @@ func (d *Driver) Create() error {
 		return fmt.Errorf("failed listing disks for instance: %w", err)
 	}
 
-	d.AdditionalDiskIDs = make([]string, 0, len(d.AdditionalDisks))
+	d.AdditionalDiskIDs = make([]string, 0, len(d.additionalDisks))
 	for _, additionalDisk := range additionalDisks {
 		// The boot disk ID state is managed irrespective of the additional disks.
 		if additionalDisk.Id == instance.BootDiskId {
@@ -403,7 +387,7 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 		// Additional disks.
 		mcnflag.StringSliceFlag{
 			Name:  flagAdditionalDisk,
-			Usage: "Additional disks to attach to the instance in the format `SIZE[,LABEL]` where `SIZE` is the disk size in bytes and `LABEL` is an arbitrary string used within the disk name for identification. `SIZE` supports a unit suffix (e.g., 20 GiB).",
+			Usage: "Additional disks to attach to the instance in the format `size=SIZE[,label=LABEL][,type=TYPE]` or `SIZE[[,LABEL],BACKEND]` where `SIZE` is the disk size in bytes, `LABEL` is an arbitrary string used within the disk name for identification, and `BACKEND` is the Oxide disk_backend: `local` or `distributed`. `SIZE` supports a unit suffix (e.g., 20 GiB).",
 		},
 
 		// Networking.
@@ -684,13 +668,13 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 		}
 		d.BootDiskSize = bootDiskSize
 
-		d.AdditionalDisks = make([]AdditionalDisk, 0)
+		d.additionalDisks = make([]additionalDisk, 0)
 		for _, diskInfo := range opts.StringSlice(flagAdditionalDisk) {
-			additionalDisk, err := ParseAdditionalDisk(diskInfo)
+			aDisk, err := parseAdditionalDisk(diskInfo)
 			if err != nil {
 				joinedParseErr = errors.Join(joinedParseErr, NewFlagParseError(flagAdditionalDisk, err))
 			}
-			d.AdditionalDisks = append(d.AdditionalDisks, additionalDisk)
+			d.additionalDisks = append(d.additionalDisks, aDisk)
 		}
 
 		if joinedParseErr != nil {
@@ -805,52 +789,4 @@ func toRancherMachineState(instanceState oxide.InstanceState) state.State {
 	default:
 		return state.None
 	}
-}
-
-// AdditionalDisk represents a disk attached to an instance.
-type AdditionalDisk struct {
-	// Required. The size of the disk in bytes.
-	Size uint64
-
-	// An optional label to use in the disk name for ease of identification.
-	Label string
-}
-
-// ParseAdditionalDisk parses an `AdditionalDisk` from a string in the format
-// `SIZE[,LABEL]` where `SIZE` is the disk size in bytes and `LABEL` is an
-// arbitrary string used within the disk name for identification. `SIZE`
-// supports a unit suffix (e.g., 20 GiB).
-func ParseAdditionalDisk(s string) (AdditionalDisk, error) {
-	var sizeStr string
-	label := "additional"
-
-	fields := strings.Split(s, ",")
-	switch len(fields) {
-	case 2:
-		sizeStr = fields[0]
-		if fields[1] != "" {
-			label = fields[1]
-		}
-	case 1:
-		sizeStr = fields[0]
-	default:
-		return AdditionalDisk{}, fmt.Errorf("invalid format %q, expected size[,label]", s)
-	}
-
-	size, err := humanize.ParseBytes(sizeStr)
-	if err != nil {
-		return AdditionalDisk{}, fmt.Errorf("failed parsing size %q %w", sizeStr, err)
-	}
-
-	a := AdditionalDisk{
-		Size:  size,
-		Label: label,
-	}
-
-	return a, nil
-}
-
-// Name returns a string representing the disk name.
-func (a AdditionalDisk) Name(machineName string, diskNumber int) string {
-	return fmt.Sprintf("disk-%02d-%s-%s", diskNumber, a.Label, machineName)
 }
