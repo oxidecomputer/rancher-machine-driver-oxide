@@ -271,7 +271,7 @@ var _ = Describe("AdditionalDisks", func() {
 			Entry("errors with invalid backend", "20GiB,,backend", "invalid backend"),
 			Entry("errors with too many args", "five,is,right,out,", "invalid format"),
 			Entry("error don't mix your metaphors", "label=awesome,local", "invalid format \"local\""),
-			Entry("error no size new way", "label=awesome", "failed parsing size \"\" strconv.ParseFloat"),
+			Entry("error no size new way", "label=awesome", "failed parsing size \"\": strconv.ParseFloat"),
 			Entry("error bad key new way", "bad=good?", `invalid additional disk part: "bad", expected "size", "label", or "type"`),
 		)
 	})

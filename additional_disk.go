@@ -8,24 +8,122 @@ import (
 	"github.com/oxidecomputer/oxide.go/oxide"
 )
 
-type additionalDiskPart int
-
 const (
-	additionalDiskPartSizeName        = "size"
-	additionalDiskPartLabelName       = "label"
-	additionalDiskPartBackendTypeName = "type"
+	additionalDiskSize        = "size"
+	additionalDiskLabel       = "label"
+	additionalDiskBackendType = "type"
 )
 
-const (
-	additionalDiskPartSize additionalDiskPart = iota
-	additionalDiskPartLabel
-	additionalDiskPartBackendType
-)
+// additionalDiskParser parses a string describing an additional disk.
+type additionalDiskParser struct {
+	// additionalDisk is the final parsed and validated disk.
+	additionalDisk
 
-var additionDiskPartMap = map[string]additionalDiskPart{
-	additionalDiskPartSizeName:        additionalDiskPartSize,
-	additionalDiskPartLabelName:       additionalDiskPartLabel,
-	additionalDiskPartBackendTypeName: additionalDiskPartBackendType,
+	// sizeStr is a temporary field used to store the input string for size.
+	sizeStr string
+}
+
+// parse parses a string in the format `size=SIZE[,label=LABEL][,type=TYPE]` or
+// `SIZE[[,LABEL],TYPE]` where :
+//   - `SIZE` is the disk size in bytes. It supports a unit suffix (e.g., 20 GiB).
+//   - `LABEL` is an arbitrary string used within the disk name for identification.
+//   - `TYPE` is the Oxide `disk_backend`: `local` or `distributed`.
+func (a *additionalDiskParser) parse(s string) error {
+	if s == "" {
+		return fmt.Errorf("invalid format empty string given, expected size[[,label],backend]")
+	}
+
+	// Default values.
+	a.label = "additional"
+	a.backend = oxide.DiskBackendTypeDistributed
+
+	// Parse input string.
+	var err error
+	if !strings.Contains(s, "=") {
+		err = a.parseLegacy(s)
+	} else {
+		err = a.parseKV(s)
+	}
+	if err != nil {
+		return err
+	}
+
+	// Parse and validate values.
+	a.size, err = humanize.ParseBytes(a.sizeStr)
+	if err != nil {
+		return fmt.Errorf("failed parsing size %q: %w", a.sizeStr, err)
+	}
+
+	if a.backend != oxide.DiskBackendTypeDistributed && a.backend != oxide.DiskBackendTypeLocal {
+		return fmt.Errorf("invalid backend %q, expected %q or %q", a.backend, oxide.DiskBackendTypeDistributed, oxide.DiskBackendTypeLocal)
+	}
+
+	return nil
+}
+
+// parseLegacy parses strings in the format `SIZE[[,LABEL],TYPE]`.
+//
+// Deprecated: This format has been deprecated in favor of the KV format and it
+// does not need to be updated to support new fields.
+func (a *additionalDiskParser) parseLegacy(s string) error {
+	fields := strings.Split(s, ",")
+	switch len(fields) {
+	case 3:
+		if s := strings.TrimSpace(fields[2]); s != "" {
+			a.backend = oxide.DiskBackendType(s)
+		}
+		fallthrough
+	case 2:
+		if s := strings.TrimSpace(fields[1]); s != "" {
+			a.label = s
+		}
+		fallthrough
+	case 1:
+		a.sizeStr = strings.TrimSpace(fields[0])
+	default:
+		return fmt.Errorf("invalid format %q, expected size[[,label],backend]", s)
+	}
+
+	return nil
+}
+
+// parseKV parses strings in the format `size=SIZE[,label=LABEL][,type=TYPE]`.
+func (a *additionalDiskParser) parseKV(s string) error {
+	for p := range strings.SplitSeq(s, ",") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+
+		part := strings.Split(p, "=")
+		if len(part) != 2 {
+			return fmt.Errorf(`invalid format %q, expected "name=value"`, p)
+		}
+
+		name := strings.TrimSpace(part[0])
+		value := strings.TrimSpace(part[1])
+
+		switch name {
+		case additionalDiskSize:
+			a.sizeStr = value
+		case additionalDiskLabel:
+			if value != "" {
+				a.label = value
+			}
+		case additionalDiskBackendType:
+			if value != "" {
+				a.backend = oxide.DiskBackendType(value)
+			}
+		default:
+			return fmt.Errorf("invalid additional disk part: %q, expected %q, %q, or %q", name,
+				additionalDiskSize,
+				additionalDiskLabel,
+				additionalDiskBackendType,
+			)
+		}
+	}
+
+	return nil
 }
 
 // additionalDisk represents a disk attached to an instance.
@@ -38,97 +136,6 @@ type additionalDisk struct {
 
 	// The type of backend to use: local or distributed
 	backend oxide.DiskBackendType
-}
-
-// parseAdditionalDisk parses an `AdditionalDisk` from a string in the format
-// size=SIZE[,label=LABEL][,type=TYPE] or
-// `SIZE[[,LABEL],TYPE]` where `SIZE` is the disk size in bytes, `LABEL` is an
-// arbitrary string used within the disk name for identification, and `TYPE` is the
-// Oxide disk_backend: `local` or `distributed`. `SIZE` supports a unit suffix (e.g., 20 GiB).
-func parseAdditionalDisk(s string) (additionalDisk, error) {
-	var sizeStr string
-	label := "additional"
-	backend := oxide.DiskBackendTypeDistributed
-
-	if s == "" {
-		return additionalDisk{}, fmt.Errorf("invalid format empty string given, expected size[[,label],backend]")
-	}
-
-	fields, err := parseAdditionalDiskParts(s)
-	if err != nil {
-		return additionalDisk{}, err
-	}
-	switch len(fields) {
-	case 3:
-		if fields[2] != "" {
-			backend = oxide.DiskBackendType(fields[2])
-		}
-		fallthrough
-	case 2:
-		if fields[1] != "" {
-			label = fields[1]
-		}
-		fallthrough
-	case 1:
-		sizeStr = fields[0]
-	default:
-		return additionalDisk{}, fmt.Errorf("invalid format %q, expected size[[,label],backend]", s)
-	}
-
-	if backend != oxide.DiskBackendTypeDistributed && backend != oxide.DiskBackendTypeLocal {
-		return additionalDisk{}, fmt.Errorf("invalid backend %q, expected %q or %q", backend, oxide.DiskBackendTypeDistributed, oxide.DiskBackendTypeLocal)
-	}
-
-	size, err := humanize.ParseBytes(sizeStr)
-	if err != nil {
-		return additionalDisk{}, fmt.Errorf("failed parsing size %q %w", sizeStr, err)
-	}
-
-	a := additionalDisk{
-		size:    size,
-		label:   label,
-		backend: backend,
-	}
-
-	return a, nil
-}
-
-// return {size, label, backend}
-func parseAdditionalDiskParts(s string) (parts []string, err error) {
-	// old way
-	if !strings.Contains(s, "=") {
-		for _, part := range strings.Split(s, ",") {
-			parts = append(parts, strings.TrimSpace(part))
-		}
-		return
-	}
-
-	// new way
-	parts = make([]string, 3)
-	for _, p := range strings.Split(s, ",") {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		part := strings.Split(p, "=")
-		if len(part) != 2 {
-			err = fmt.Errorf("invalid format %q, expected \"name=value\"", p)
-			return
-		}
-		name := strings.TrimSpace(part[0])
-		value := strings.TrimSpace(part[1])
-		index, ok := additionDiskPartMap[name]
-		if !ok {
-			err = fmt.Errorf("invalid additional disk part: %q, expected %q, %q, or %q", name,
-				additionalDiskPartSizeName,
-				additionalDiskPartLabelName,
-				additionalDiskPartBackendTypeName,
-			)
-		}
-		parts[index] = value
-	}
-
-	return
 }
 
 // name returns a string representing the disk name.
@@ -184,4 +191,13 @@ func (a *additionalDisk) createInstanceDiskAttachment(i int, machineName string)
 			Size:        oxide.ByteCount(a.size),
 		},
 	}
+}
+
+// parseAdditionalDisk parses an `AdditionalDisk` from a string.
+func parseAdditionalDisk(s string) (additionalDisk, error) {
+	a := additionalDiskParser{}
+	if err := a.parse(s); err != nil {
+		return additionalDisk{}, err
+	}
+	return a.additionalDisk, nil
 }
