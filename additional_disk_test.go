@@ -46,6 +46,7 @@ var _ = Describe("AdditionalDisks", func() {
 			Expect(ok).To(BeTrue())
 
 			source, ok := backend.DiskSource.Value.(*oxide.DiskSourceBlank)
+			Expect(ok).To(BeTrue())
 			Expect(source.BlockSize).To(Equal(oxide.BlockSize(4096)))
 		})
 	})

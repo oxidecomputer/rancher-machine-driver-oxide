@@ -17,13 +17,14 @@ $(BINDIR):
 
 .PHONY: test
 test:
-	ginkgo --cover --output-dir=build  ./...
+	$(GO) tool -modfile tools/go.mod \
+		ginkgo --cover --output-dir=build  ./...
 
 .PHONY: cover
 cover: test
 	$(GO) tool cover \
-          -html=build/coverprofile.out \
-	  -o build/index.html
+		-html=build/coverprofile.out \
+		-o build/index.html
 
 .PHONY: clean
 clean:
@@ -31,8 +32,10 @@ clean:
 
 .PHONY: lint
 lint:
-	golangci-lint run
+	$(GO) tool -modfile tools/go.mod \
+		golangci-lint run
 
 .PHONY: lint-fix
 lint-fix:
-	golangci-lint run --fix
+	$(GO) tool -modfile tools/go.mod \
+		golangci-lint run --fix
