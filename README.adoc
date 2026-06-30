@@ -58,6 +58,11 @@ spec:
   externalId: ""
   uiUrl: ""
   url: "https://example.com/docker-machine-driver-oxide"
+  # Uncomment when using the Oxide Rancher UI extensions. This must contain all
+  # the Oxide silos that Rancher will create Kubernetes clusters in.
+  # whitelistDomains:
+  #   - "https://oxide-a.sys.example.com"
+  #   - "https://oxide-b.sys.example.com"
 ----
 
 . Apply the Kubernetes manifest to create the Oxide Rancher node driver.
