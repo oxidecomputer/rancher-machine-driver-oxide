@@ -1,0 +1,76 @@
+---
+on:
+  workflow_dispatch:
+    inputs:
+      node_driver_url:
+        description: "URL to the docker-machine-driver-oxide binary to test."
+        default: "https://github.com/oxidecomputer/rancher-machine-driver-oxide/releases/download/v0.11.0/docker-machine-driver-oxide"
+        required: false
+        type: string
+      node_driver_checksum:
+        description: "SHA256 checksum of the node driver binary."
+        default: "d0fd21a622b90fb2f2c9d99e70036bdbf8eceb75072ee506ff8fb784e1178b09"
+        required: false
+        type: string
+
+name: End-to-End Test
+
+# Only allow one workflow execution at a time as it provisions real Oxide
+# infrastructure that does not guarantee to be free of name conflicts.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    name: Rancher Node Driver
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      RANCHER_E2E: "1"
+      RANCHER_E2E_SHOWCASE_DIR: ${{ github.workspace }}/showcase/integration/rancher
+      RANCHER_E2E_STAGE_RKE2_OXIDE_PROFILE: e2e
+      RANCHER_E2E_STAGE_RKE2_TF_VAR_project: sse
+      RANCHER_E2E_STAGE_RKE2_TF_VAR_source_image_id: 55bcf752-595e-425d-9923-817f82b0d5b8 # suse-linux-micro-2026-06-22-232354
+      RANCHER_E2E_STAGE_RKE2_TF_VAR_floating_ip_pool_id: 4a125719-9d1d-49e9-a2e4-042053a4716b # public
+      RANCHER_E2E_STAGE_RANCHER_TF_VAR_rancher_password: ${{ secrets.RANCHER_PASSWORD }}
+      RANCHER_E2E_STAGE_NODEDRIVER_TF_VAR_oxide_profile: e2e
+      RANCHER_E2E_STAGE_K8S_TF_VAR_ccm_oxide_profile: e2e
+      RANCHER_E2E_STAGE_NODEDRIVER_TF_VAR_oxide_nodedriver_url: ${{ inputs.node_driver_url }}
+      RANCHER_E2E_STAGE_NODEDRIVER_TF_VAR_oxide_nodedriver_checksum: ${{ inputs.node_driver_checksum }}
+    steps:
+      - name: Checkout Rancher Node Driver
+        uses: actions/checkout@v7
+
+      - name: Checkout Showcase
+        uses: actions/checkout@v7
+        with:
+          repository: oxidecomputer/showcase
+          path: showcase
+
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "go.mod"
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Configure Oxide Credentials
+        env:
+          OXIDE_HOST: ${{ secrets.OXIDE_HOST }}
+          OXIDE_TOKEN: ${{ secrets.OXIDE_TOKEN }}
+        run: |
+          mkdir -p "$HOME/.config/oxide"
+          cat > "$HOME/.config/oxide/credentials.toml" <<EOF
+          [profile.e2e]
+          host = "$OXIDE_HOST"
+          token = "$OXIDE_TOKEN"
+          EOF
+          chmod 600 "$HOME/.config/oxide/credentials.toml"
+
+      - name: Run End-to-End Test
+        run: |
+          go test -run TestRancherNodeDriver -v -timeout 60m .
