@@ -34,37 +34,27 @@ var terraformStages = []string{
 }
 
 func TestRancherNodeDriver(t *testing.T) {
-	if os.Getenv("RANCHER_E2E") == "" {
-		t.Skip("set RANCHER_E2E=1 to run the Rancher end-to-end test")
-	}
+	rancherDir, terraformBin := e2eSetup(t)
 
-	rancherDir := os.Getenv("RANCHER_E2E_SHOWCASE_DIR")
-	if rancherDir == "" {
-		t.Fatal("RANCHER_E2E_SHOWCASE_DIR must point at the cloned oxidecomputer/showcase/integration/rancher repository")
-	}
-	if _, err := os.Stat(rancherDir); err != nil {
-		t.Fatalf("RANCHER_E2E_SHOWCASE_DIR %q: %v", rancherDir, err)
-	}
-
-	terraformBin := os.Getenv("RANCHER_E2E_TERRAFORM_BIN")
-	if terraformBin == "" {
-		terraformBin = "terraform"
-	}
-	if _, err := exec.LookPath(terraformBin); err != nil {
-		t.Fatalf("terraform binary %q not found: %v", terraformBin, err)
-	}
+	// In CI the destroy runs as a dedicated `if: always()` workflow step so
+	// that it also executes when this test is cancelled or times out (neither
+	// of which run t.Cleanup). Set RANCHER_E2E_SKIP_DESTROY=1 there to avoid a
+	// redundant in-test destroy. Local runs keep the cleanup for convenience.
+	skipDestroy := os.Getenv("RANCHER_E2E_SKIP_DESTROY") != ""
 
 	for _, stage := range terraformStages {
 		stageDir := filepath.Join(rancherDir, stage)
 
 		extraEnv := stageEnv(stage)
 
-		t.Cleanup(func() {
-			if err := terraform(t, terraformBin, stageDir, extraEnv,
-				"destroy", "-input=false", "-auto-approve"); err != nil {
-				t.Errorf("stage %q destroy: %v", stage, err)
-			}
-		})
+		if !skipDestroy {
+			t.Cleanup(func() {
+				if err := terraform(t, terraformBin, stageDir, extraEnv,
+					"destroy", "-input=false", "-auto-approve"); err != nil {
+					t.Errorf("stage %q destroy: %v", stage, err)
+				}
+			})
+		}
 
 		ok := t.Run(stage, func(t *testing.T) {
 			if err := terraform(t, terraformBin, stageDir, extraEnv, "init", "-input=false"); err != nil {
@@ -92,6 +82,59 @@ func TestRancherNodeDriver(t *testing.T) {
 			t.Fatalf("stage %q failed; halting pipeline", stage)
 		}
 	}
+}
+
+// TestRancherNodeDriverDestroy tears down every Terraform stage in reverse
+// dependency order. It is a standalone entry point so CI can run it as a
+// dedicated `if: always()` step, guaranteeing cleanup even when the apply test
+// is cancelled or hits its timeout. Each stage is best-effort: a failure is
+// reported but does not stop the remaining stages from being destroyed.
+func TestRancherNodeDriverDestroy(t *testing.T) {
+	rancherDir, terraformBin := e2eSetup(t)
+
+	for i := len(terraformStages) - 1; i >= 0; i-- {
+		stage := terraformStages[i]
+		stageDir := filepath.Join(rancherDir, stage)
+		extraEnv := stageEnv(stage)
+
+		t.Run(stage, func(t *testing.T) {
+			if err := terraform(t, terraformBin, stageDir, extraEnv, "init", "-input=false"); err != nil {
+				t.Fatalf("init: %v", err)
+			}
+			if err := terraform(t, terraformBin, stageDir, extraEnv,
+				"destroy", "-input=false", "-auto-approve"); err != nil {
+				t.Errorf("destroy: %v", err)
+			}
+		})
+	}
+}
+
+// e2eSetup validates the environment shared by the end-to-end tests and returns
+// the showcase rancher directory and the terraform binary to use.
+func e2eSetup(t *testing.T) (rancherDir, terraformBin string) {
+	t.Helper()
+
+	if os.Getenv("RANCHER_E2E") == "" {
+		t.Skip("set RANCHER_E2E=1 to run the Rancher end-to-end test")
+	}
+
+	rancherDir = os.Getenv("RANCHER_E2E_SHOWCASE_DIR")
+	if rancherDir == "" {
+		t.Fatal("RANCHER_E2E_SHOWCASE_DIR must point at the cloned oxidecomputer/showcase/integration/rancher repository")
+	}
+	if _, err := os.Stat(rancherDir); err != nil {
+		t.Fatalf("RANCHER_E2E_SHOWCASE_DIR %q: %v", rancherDir, err)
+	}
+
+	terraformBin = os.Getenv("RANCHER_E2E_TERRAFORM_BIN")
+	if terraformBin == "" {
+		terraformBin = "terraform"
+	}
+	if _, err := exec.LookPath(terraformBin); err != nil {
+		t.Fatalf("terraform binary %q not found: %v", terraformBin, err)
+	}
+
+	return rancherDir, terraformBin
 }
 
 func terraform(t *testing.T, terraformBin string, dir string, extraEnv []string, args ...string) error {

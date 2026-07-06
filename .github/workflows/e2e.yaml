@@ -72,5 +72,20 @@ jobs:
           chmod 600 "$HOME/.config/oxide/credentials.toml"
 
       - name: Run End-to-End Test
+        # Bound the apply phase at the step level so a hung or failing run trips
+        # this step (marking it failed) instead of stalling the whole job. The
+        # Destroy Infrastructure step below still runs afterwards.
+        timeout-minutes: 60
+        env:
+          # Destroy is handled by the dedicated always()-run step below.
+          RANCHER_E2E_SKIP_DESTROY: "1"
         run: |
-          go test -run TestRancherNodeDriver -v -timeout 60m .
+          go test -run '^TestRancherNodeDriver$' -v -timeout 55m .
+
+      - name: Destroy Infrastructure
+        # always() so cleanup runs even when the apply step is cancelled or
+        # times out, neither of which run the test's t.Cleanup handlers.
+        if: always()
+        timeout-minutes: 30
+        run: |
+          go test -run '^TestRancherNodeDriverDestroy$' -v -timeout 25m .
