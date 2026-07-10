@@ -25,7 +25,7 @@ require (
 	github.com/pelletier/go-toml v1.9.5 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/urfave/cli v1.22.15 // indirect
-	golang.org/x/crypto v0.51.0 // indirect
+	golang.org/x/crypto v0.52.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/term v0.43.0 // indirect
