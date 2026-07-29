@@ -29,6 +29,9 @@ const (
 	defaultDescription  = "Managed by the Oxide Rancher machine driver."
 	defaultMemory       = "4 GiB"
 	defaultBootDiskSize = "20 GiB"
+	retryAttempts       = 3
+	retryDelay          = time.Second
+	stopTimeout         = 2 * time.Minute
 )
 
 const (
@@ -159,7 +162,7 @@ func (d *Driver) createOxideClient() (*oxide.Client, error) {
 // disks) and updates the machine driver with state for use by other methods.
 // Create must start the instance otherwise the machine driver will time out
 // waiting for the instance to start.
-func (d *Driver) Create() error {
+func (d *Driver) Create() (err error) {
 	if d.oxideClient == nil {
 		client, err := d.createOxideClient()
 		if err != nil {
@@ -167,6 +170,20 @@ func (d *Driver) Create() error {
 		}
 		d.oxideClient = client
 	}
+
+	// Defer the cleanup of created resources if [Create] errors so we don't leak
+	// any resources.
+	defer func() {
+		if err == nil {
+			return
+		}
+		if removeErr := d.Remove(); removeErr != nil {
+			err = errors.Join(err, fmt.Errorf(
+				"failed removing resources after create failure: %w",
+				removeErr,
+			))
+		}
+	}()
 
 	pubKey, err := d.createSSHKeyPair()
 	if err != nil {
@@ -278,6 +295,7 @@ func (d *Driver) Create() error {
 			UserData:      base64.StdEncoding.EncodeToString(userData),
 		},
 	}
+
 	instance, err := d.oxideClient.InstanceCreate(context.TODO(), icp)
 	if err != nil {
 		return err
@@ -285,6 +303,16 @@ func (d *Driver) Create() error {
 
 	d.InstanceID = instance.Id
 	d.BootDiskID = instance.BootDiskId
+	d.AdditionalDiskIDs = nil
+
+	if len(d.additionalDisks) > 0 {
+		err := retry(context.TODO(), func() error {
+			return d.recordAdditionalDiskIDs(context.TODO())
+		}, retryAttempts, retryDelay)
+		if err != nil {
+			return fmt.Errorf("failed listing disks for instance: %w", err)
+		}
+	}
 
 	inilp := oxide.InstanceNetworkInterfaceListParams{
 		Instance: oxide.NameOrId(d.InstanceID),
@@ -314,20 +342,45 @@ func (d *Driver) Create() error {
 		)
 	}
 
-	additionalDisks, err := d.oxideClient.InstanceDiskListAllPages(context.TODO(), oxide.InstanceDiskListParams{
+	return nil
+}
+
+func (d *Driver) recordAdditionalDiskIDs(ctx context.Context) error {
+	disks, err := d.oxideClient.InstanceDiskListAllPages(ctx, oxide.InstanceDiskListParams{
 		Instance: oxide.NameOrId(d.InstanceID),
 	})
 	if err != nil {
-		return fmt.Errorf("failed listing disks for instance: %w", err)
+		return err
 	}
 
-	d.AdditionalDiskIDs = make([]string, 0, len(d.additionalDisks))
-	for _, additionalDisk := range additionalDisks {
+	recorded := make(map[string]struct{}, len(d.AdditionalDiskIDs))
+	for _, diskID := range d.AdditionalDiskIDs {
+		recorded[diskID] = struct{}{}
+	}
+	expected := make(map[string]struct{}, len(d.additionalDisks))
+	for i, disk := range d.additionalDisks {
+		expected[disk.name(d.MachineName, i)] = struct{}{}
+	}
+	for _, disk := range disks {
 		// The boot disk ID state is managed irrespective of the additional disks.
-		if additionalDisk.Id == instance.BootDiskId {
+		if disk.Id == d.BootDiskID {
 			continue
 		}
-		d.AdditionalDiskIDs = append(d.AdditionalDiskIDs, additionalDisk.Id)
+		if _, ok := expected[string(disk.Name)]; !ok {
+			continue
+		}
+		if _, ok := recorded[disk.Id]; ok {
+			continue
+		}
+		d.AdditionalDiskIDs = append(d.AdditionalDiskIDs, disk.Id)
+		recorded[disk.Id] = struct{}{}
+	}
+	if len(d.AdditionalDiskIDs) != len(d.additionalDisks) {
+		return fmt.Errorf(
+			"found %d of %d additional disks",
+			len(d.AdditionalDiskIDs),
+			len(d.additionalDisks),
+		)
 	}
 
 	return nil
@@ -525,65 +578,139 @@ func (d *Driver) Remove() error {
 		d.oxideClient = client
 	}
 
-	instanceExists := true
-	if err := d.Stop(); err != nil {
-		if !errors.Is(err, oxide.ErrHTTP404) {
-			return err
+	var removeErr error
+	// Retain failures encountered while preparing the instance for deletion.
+	// They only matter if deleting the instance also fails.
+	var instanceReadinessErr error
+	instanceExists := d.InstanceID != ""
+	stopCtx, cancel := context.WithTimeout(context.TODO(), stopTimeout)
+	defer cancel()
+
+	if instanceExists && len(d.AdditionalDiskIDs) < len(d.additionalDisks) {
+		err := retry(stopCtx, func() error {
+			return d.recordAdditionalDiskIDs(stopCtx)
+		}, retryAttempts, retryDelay)
+		if errors.Is(err, oxide.ErrHTTP404) {
+			instanceExists = false
+		} else if err != nil {
+			return fmt.Errorf("failed recording additional disks: %w", err)
 		}
-		instanceExists = false
+	}
+
+	if instanceExists {
+		instanceReadinessErr = retry(stopCtx, func() error {
+			_, err := d.oxideClient.InstanceStop(stopCtx, oxide.InstanceStopParams{
+				Instance: oxide.NameOrId(d.InstanceID),
+			})
+			return err
+		}, retryAttempts, retryDelay)
+		if errors.Is(instanceReadinessErr, oxide.ErrHTTP404) {
+			instanceExists = false
+			instanceReadinessErr = nil
+		}
 	}
 
 	// The instance cannot be deleted until it's stopped. Wait for it to stop.
-	stopCtx, cancel := context.WithTimeout(context.TODO(), 2*time.Minute)
-	defer cancel()
-
 	for instanceExists {
-		select {
-		case <-stopCtx.Done():
-			return fmt.Errorf("timed out waiting for instance to stop: %w", stopCtx.Err())
-		default:
-		}
-
-		currentState, err := d.GetState()
+		instance, err := d.oxideClient.InstanceView(stopCtx, oxide.InstanceViewParams{
+			Instance: oxide.NameOrId(d.InstanceID),
+		})
 		if err != nil {
 			if errors.Is(err, oxide.ErrHTTP404) {
+				instanceReadinessErr = nil
 				break
 			}
-			return err
+			if !isTransientError(err) {
+				instanceReadinessErr = errors.Join(
+					instanceReadinessErr,
+					fmt.Errorf("failed getting instance state: %w", err),
+				)
+				break
+			}
+		} else {
+			currentState := toRancherMachineState(instance.RunState)
+			if currentState == state.Stopped || currentState == state.NotFound {
+				instanceReadinessErr = nil
+				break
+			}
 		}
 
-		if currentState == state.Stopped {
-			break
+		select {
+		case <-stopCtx.Done():
+			instanceReadinessErr = errors.Join(
+				instanceReadinessErr,
+				fmt.Errorf(
+					"timed out waiting for instance to stop: %w",
+					stopCtx.Err(),
+				),
+			)
+			instanceExists = false
+		case <-time.After(retryDelay):
 		}
 	}
 
-	if err := d.oxideClient.CurrentUserSshKeyDelete(context.TODO(), oxide.CurrentUserSshKeyDeleteParams{
-		SshKey: oxide.NameOrId(d.SSHPublicKeyID),
-	}); err != nil && !errors.Is(err, oxide.ErrHTTP404) {
-		return err
+	if d.SSHPublicKeyID != "" {
+		err := retry(context.TODO(), func() error {
+			return d.oxideClient.CurrentUserSshKeyDelete(
+				context.TODO(),
+				oxide.CurrentUserSshKeyDeleteParams{
+					SshKey: oxide.NameOrId(d.SSHPublicKeyID),
+				},
+			)
+		}, retryAttempts, retryDelay)
+		if err != nil && !errors.Is(err, oxide.ErrHTTP404) {
+			removeErr = errors.Join(removeErr, fmt.Errorf(
+				"failed deleting SSH key: %w",
+				err,
+			))
+		}
 	}
 
-	if err := d.oxideClient.InstanceDelete(context.TODO(), oxide.InstanceDeleteParams{
-		Instance: oxide.NameOrId(d.InstanceID),
-	}); err != nil && !errors.Is(err, oxide.ErrHTTP404) {
-		return err
+	if d.InstanceID != "" {
+		err := retry(context.TODO(), func() error {
+			return d.oxideClient.InstanceDelete(context.TODO(), oxide.InstanceDeleteParams{
+				Instance: oxide.NameOrId(d.InstanceID),
+			})
+		}, retryAttempts, retryDelay)
+		if err != nil && !errors.Is(err, oxide.ErrHTTP404) {
+			removeErr = errors.Join(
+				removeErr,
+				instanceReadinessErr,
+				fmt.Errorf("failed deleting instance: %w", err),
+			)
+		}
 	}
 
-	if err := d.oxideClient.DiskDelete(context.TODO(), oxide.DiskDeleteParams{
-		Disk: oxide.NameOrId(d.BootDiskID),
-	}); err != nil && !errors.Is(err, oxide.ErrHTTP404) {
-		return err
+	if d.BootDiskID != "" {
+		err := retry(context.TODO(), func() error {
+			return d.oxideClient.DiskDelete(context.TODO(), oxide.DiskDeleteParams{
+				Disk: oxide.NameOrId(d.BootDiskID),
+			})
+		}, retryAttempts, retryDelay)
+		if err != nil && !errors.Is(err, oxide.ErrHTTP404) {
+			removeErr = errors.Join(removeErr, fmt.Errorf(
+				"failed deleting boot disk: %w",
+				err,
+			))
+		}
 	}
 
 	for _, additionalDiskID := range d.AdditionalDiskIDs {
-		if err := d.oxideClient.DiskDelete(context.TODO(), oxide.DiskDeleteParams{
-			Disk: oxide.NameOrId(additionalDiskID),
-		}); err != nil && !errors.Is(err, oxide.ErrHTTP404) {
-			return err
+		err := retry(context.TODO(), func() error {
+			return d.oxideClient.DiskDelete(context.TODO(), oxide.DiskDeleteParams{
+				Disk: oxide.NameOrId(additionalDiskID),
+			})
+		}, retryAttempts, retryDelay)
+		if err != nil && !errors.Is(err, oxide.ErrHTTP404) {
+			removeErr = errors.Join(removeErr, fmt.Errorf(
+				"failed deleting additional disk %q: %w",
+				additionalDiskID,
+				err,
+			))
 		}
 	}
 
-	return nil
+	return removeErr
 }
 
 // Restart restarts the instance without changing its configuration.
@@ -796,4 +923,41 @@ func toRancherMachineState(instanceState oxide.InstanceState) state.State {
 	default:
 		return state.None
 	}
+}
+
+func retry(
+	ctx context.Context,
+	fn func() error,
+	attempts int,
+	delay time.Duration,
+) error {
+	var err error
+	for attempt := range attempts {
+		err = fn()
+		if err == nil || errors.Is(err, oxide.ErrHTTP404) {
+			return err
+		}
+		if !isTransientError(err) {
+			return err
+		}
+		if attempt < attempts-1 {
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
+		}
+	}
+	return err
+}
+
+func isTransientError(err error) bool {
+	var httpErr *oxide.HTTPError
+	if !errors.As(err, &httpErr) {
+		return true
+	}
+	status := httpErr.HTTPResponse.StatusCode
+	return status == 409 || status == 429 || status >= 500
 }
