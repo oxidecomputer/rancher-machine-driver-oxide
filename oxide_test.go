@@ -6,6 +6,9 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/oxidecomputer/oxide.go/oxide"
@@ -52,6 +55,89 @@ var _ = Describe("Driver", func() {
 				Expect(err.Error()).To(ContainSubstring("required option \"oxide-project\" not set"))
 				Expect(err.Error()).To(ContainSubstring("required option \"oxide-boot-disk-image-id\" not set"))
 			})
+		})
+	})
+
+	Describe("Remove", func() {
+		It("should finish removing resources after a partial failure", func() {
+			sshKeyExists := true
+			instanceExists := true
+			bootDiskExists := true
+			additionalDiskExists := true
+			failInstanceDelete := true
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodPost && r.URL.Path == "/v1/instances/instance-id/stop":
+					if !instanceExists {
+						http.Error(w, "not found", http.StatusNotFound)
+						return
+					}
+					_, _ = w.Write([]byte("{}"))
+				case r.Method == http.MethodGet && r.URL.Path == "/v1/instances/instance-id":
+					if !instanceExists {
+						http.Error(w, "not found", http.StatusNotFound)
+						return
+					}
+					_, _ = w.Write([]byte(`{"run_state":"stopped"}`))
+				case r.Method == http.MethodDelete && r.URL.Path == "/v1/me/ssh-keys/ssh-key-id":
+					if !sshKeyExists {
+						http.Error(w, "not found", http.StatusNotFound)
+						return
+					}
+					sshKeyExists = false
+					w.WriteHeader(http.StatusNoContent)
+				case r.Method == http.MethodDelete && r.URL.Path == "/v1/instances/instance-id":
+					if failInstanceDelete {
+						failInstanceDelete = false
+						http.Error(w, "failed deleting instance", http.StatusInternalServerError)
+						return
+					}
+					if !instanceExists {
+						http.Error(w, "not found", http.StatusNotFound)
+						return
+					}
+					instanceExists = false
+					w.WriteHeader(http.StatusNoContent)
+				case r.Method == http.MethodDelete && r.URL.Path == "/v1/disks/boot-disk-id":
+					if !bootDiskExists {
+						http.Error(w, "not found", http.StatusNotFound)
+						return
+					}
+					bootDiskExists = false
+					w.WriteHeader(http.StatusNoContent)
+				case r.Method == http.MethodDelete && r.URL.Path == "/v1/disks/additional-disk-id":
+					if !additionalDiskExists {
+						http.Error(w, "not found", http.StatusNotFound)
+						return
+					}
+					additionalDiskExists = false
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					http.Error(w, "unexpected request", http.StatusInternalServerError)
+				}
+			}))
+			defer server.Close()
+
+			SUT.Host = server.URL
+			SUT.Token = "token"
+			SUT.SSHPublicKeyID = "ssh-key-id"
+			SUT.InstanceID = "instance-id"
+			SUT.BootDiskID = "boot-disk-id"
+			SUT.AdditionalDiskIDs = []string{"additional-disk-id"}
+
+			Expect(SUT.Remove()).To(HaveOccurred())
+			Expect(sshKeyExists).To(BeFalse())
+			Expect(instanceExists).To(BeTrue())
+			Expect(bootDiskExists).To(BeTrue())
+			Expect(additionalDiskExists).To(BeTrue())
+
+			Expect(SUT.Remove()).To(Succeed())
+			Expect(instanceExists).To(BeFalse())
+			Expect(bootDiskExists).To(BeFalse())
+			Expect(additionalDiskExists).To(BeFalse())
+
+			Expect(SUT.Remove()).To(Succeed())
 		})
 	})
 

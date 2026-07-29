@@ -525,15 +525,19 @@ func (d *Driver) Remove() error {
 		d.oxideClient = client
 	}
 
+	instanceExists := true
 	if err := d.Stop(); err != nil {
-		return err
+		if !errors.Is(err, oxide.ErrHTTP404) {
+			return err
+		}
+		instanceExists = false
 	}
 
 	// The instance cannot be deleted until it's stopped. Wait for it to stop.
 	stopCtx, cancel := context.WithTimeout(context.TODO(), 2*time.Minute)
 	defer cancel()
 
-	for {
+	for instanceExists {
 		select {
 		case <-stopCtx.Done():
 			return fmt.Errorf("timed out waiting for instance to stop: %w", stopCtx.Err())
@@ -542,6 +546,9 @@ func (d *Driver) Remove() error {
 
 		currentState, err := d.GetState()
 		if err != nil {
+			if errors.Is(err, oxide.ErrHTTP404) {
+				break
+			}
 			return err
 		}
 
@@ -552,26 +559,26 @@ func (d *Driver) Remove() error {
 
 	if err := d.oxideClient.CurrentUserSshKeyDelete(context.TODO(), oxide.CurrentUserSshKeyDeleteParams{
 		SshKey: oxide.NameOrId(d.SSHPublicKeyID),
-	}); err != nil {
+	}); err != nil && !errors.Is(err, oxide.ErrHTTP404) {
 		return err
 	}
 
 	if err := d.oxideClient.InstanceDelete(context.TODO(), oxide.InstanceDeleteParams{
 		Instance: oxide.NameOrId(d.InstanceID),
-	}); err != nil {
+	}); err != nil && !errors.Is(err, oxide.ErrHTTP404) {
 		return err
 	}
 
 	if err := d.oxideClient.DiskDelete(context.TODO(), oxide.DiskDeleteParams{
 		Disk: oxide.NameOrId(d.BootDiskID),
-	}); err != nil {
+	}); err != nil && !errors.Is(err, oxide.ErrHTTP404) {
 		return err
 	}
 
 	for _, additionalDiskID := range d.AdditionalDiskIDs {
 		if err := d.oxideClient.DiskDelete(context.TODO(), oxide.DiskDeleteParams{
 			Disk: oxide.NameOrId(additionalDiskID),
-		}); err != nil {
+		}); err != nil && !errors.Is(err, oxide.ErrHTTP404) {
 			return err
 		}
 	}
