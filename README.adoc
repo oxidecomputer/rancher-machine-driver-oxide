@@ -84,7 +84,7 @@ kubectl apply -f oxide-nodedriver.yaml
 ----
 rancher-machine create \
   --driver oxide \
-  --oxide-additional-ssh-public-key-ids 529885a0-2919-463a-a588-ac48f100a165 \
+  --oxide-ssh-public-key 529885a0-2919-463a-a588-ac48f100a165 \
   --oxide-boot-disk-image-id feb2c8ee-5a1d-4d66-beeb-289b860561bf \
   --oxide-boot-disk-size "21474836480" \
   --oxide-host https://silo01.oxide.example.com \
