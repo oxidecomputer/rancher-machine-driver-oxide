@@ -24,7 +24,6 @@ import (
 )
 
 const (
-	defaultSSHUser      = "oxide"
 	defaultSSHPort      = 22
 	defaultDescription  = "Managed by the Oxide Rancher machine driver."
 	defaultMemory       = "4 GiB"
@@ -138,7 +137,6 @@ func newDriver(machineName, storePath string) *Driver {
 	return &Driver{
 		BaseDriver: &drivers.BaseDriver{
 			MachineName: machineName,
-			SSHUser:     defaultSSHUser,
 			SSHPort:     defaultSSHPort,
 			StorePath:   storePath,
 		},
@@ -478,13 +476,12 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 		// SSH information.
 		mcnflag.StringFlag{
 			Name:   flagSSHUser,
-			Usage:  "User to use when connecting to the instance via SSH.",
+			Usage:  "User that Rancher uses to connect to the provisioned node over SSH and configure it for Kubernetes.",
 			EnvVar: "OXIDE_SSH_USER",
 		},
 		mcnflag.StringSliceFlag{
 			Name:   flagSSHPublicKey,
-			Usage:  "Additional SSH public keys IDs to inject into the instance.",
-			EnvVar: "OXIDE_ADDITIONAL_SSH_PUBLIC_KEY_IDS",
+			Usage:  "Existing Oxide SSH key names or IDs to inject into the instance. Do not provide OpenSSH public key material.",
 		},
 
 		// Anti-affinity groups.
@@ -559,11 +556,33 @@ func (d *Driver) Kill() error {
 // PreCreateCheck performs necessary driver validation before creating any
 // instance.
 func (d *Driver) PreCreateCheck() error {
+	if d.oxideClient == nil {
+		client, err := d.createOxideClient()
+		if err != nil {
+			return fmt.Errorf("could not create oxide client: %w", err)
+		}
+		d.oxideClient = client
+	}
+
 	if d.UserDataFile != "" {
 		if _, err := os.Stat(d.UserDataFile); os.IsNotExist(err) {
 			return fmt.Errorf("user data file %s could not be found", d.UserDataFile)
 		}
 	}
+
+	for _, group := range d.AntiAffinityGroups {
+		_, err := d.oxideClient.AntiAffinityGroupView(context.TODO(), oxide.AntiAffinityGroupViewParams{
+			Project:           oxide.NameOrId(d.Project),
+			AntiAffinityGroup: oxide.NameOrId(group),
+		})
+		if err != nil {
+			if errors.Is(err, oxide.ErrHTTP404) {
+				return fmt.Errorf("anti-affinity group %q does not exist in project %q: %w", group, d.Project, err)
+			}
+			return fmt.Errorf("failed validating anti-affinity group %q in project %q: %w", group, d.Project, err)
+		}
+	}
+
 	return nil
 }
 
@@ -770,6 +789,10 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 
 		if d.BootDiskImageID == "" {
 			joinedRequiredFlagError = errors.Join(joinedRequiredFlagError, NewRequiredFlagError(flagBootDiskImageID))
+		}
+
+		if d.SSHUser == "" {
+			joinedRequiredFlagError = errors.Join(joinedRequiredFlagError, NewRequiredFlagError(flagSSHUser))
 		}
 
 		if joinedRequiredFlagError != nil {

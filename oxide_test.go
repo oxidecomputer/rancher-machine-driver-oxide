@@ -45,6 +45,7 @@ var _ = Describe("Driver", func() {
 				Entry("token", []string{flagToken}),
 				Entry("project", []string{flagProject}),
 				Entry("diskImageId", []string{flagBootDiskImageID}),
+				Entry("sshUser", []string{flagSSHUser}),
 			)
 
 			It("should fail when nothing is given", func() {
@@ -56,7 +57,48 @@ var _ = Describe("Driver", func() {
 				Expect(err.Error()).To(ContainSubstring("required option \"oxide-token\" not set"))
 				Expect(err.Error()).To(ContainSubstring("required option \"oxide-project\" not set"))
 				Expect(err.Error()).To(ContainSubstring("required option \"oxide-boot-disk-image-id\" not set"))
+				Expect(err.Error()).To(ContainSubstring("required option \"oxide-ssh-user\" not set"))
 			})
+		})
+	})
+
+	Describe("PreCreateCheck", func() {
+		It("should validate every anti-affinity group", func() {
+			requestedGroups := []string{}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				Expect(r.Method).To(Equal(http.MethodGet))
+				Expect(r.URL.Query().Get("project")).To(Equal("project"))
+				requestedGroups = append(requestedGroups, r.URL.Path)
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			defer server.Close()
+
+			SUT.Host = server.URL
+			SUT.Token = "token"
+			SUT.Project = "project"
+			SUT.AntiAffinityGroups = []string{"data", "workers"}
+
+			Expect(SUT.PreCreateCheck()).To(Succeed())
+			Expect(requestedGroups).To(ConsistOf(
+				"/v1/anti-affinity-groups/data",
+				"/v1/anti-affinity-groups/workers",
+			))
+		})
+
+		It("should identify a missing anti-affinity group", func() {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, "not found", http.StatusNotFound)
+			}))
+			defer server.Close()
+
+			SUT.Host = server.URL
+			SUT.Token = "token"
+			SUT.Project = "project"
+			SUT.AntiAffinityGroups = []string{"missing"}
+
+			err := SUT.PreCreateCheck()
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring(`anti-affinity group "missing" does not exist in project "project"`))
 		})
 	})
 
@@ -390,6 +432,7 @@ func defaultMockDriverOptions() (rv *commandstest.FakeFlagger) {
 	rv.Data[flagToken] = "token"
 	rv.Data[flagProject] = "project"
 	rv.Data[flagBootDiskImageID] = "image"
+	rv.Data[flagSSHUser] = "oxide"
 
 	return rv
 }
