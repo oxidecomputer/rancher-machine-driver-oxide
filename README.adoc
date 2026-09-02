@@ -45,6 +45,8 @@ metadata:
   annotations:
     privateCredentialFields: token
     publicCredentialFields: host
+    # Rancher receives userDataFile as text, but the driver expects a file path.
+    # This mapping writes the text to a file and passes its path to the driver.
     nodedriver.cattle.io/file-to-field-aliases: "userDataFile:userDataFile"
   finalizers:
   - controller.cattle.io/node-driver-controller
