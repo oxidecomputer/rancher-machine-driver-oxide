@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"time"
+	"uuid"
 
 	"github.com/dustin/go-humanize"
 	"github.com/oxidecomputer/oxide.go/oxide"
@@ -571,10 +572,13 @@ func (d *Driver) PreCreateCheck() error {
 	}
 
 	for _, group := range d.AntiAffinityGroups {
-		_, err := d.oxideClient.AntiAffinityGroupView(context.TODO(), oxide.AntiAffinityGroupViewParams{
-			Project:           oxide.NameOrId(d.Project),
+		params := oxide.AntiAffinityGroupViewParams{
 			AntiAffinityGroup: oxide.NameOrId(group),
-		})
+		}
+		if _, err := uuid.Parse(group); len(group) != 36 || err != nil {
+			params.Project = oxide.NameOrId(d.Project)
+		}
+		_, err := d.oxideClient.AntiAffinityGroupView(context.TODO(), params)
 		if err != nil {
 			if errors.Is(err, oxide.ErrHTTP404) {
 				return fmt.Errorf("anti-affinity group %q does not exist in project %q: %w", group, d.Project, err)

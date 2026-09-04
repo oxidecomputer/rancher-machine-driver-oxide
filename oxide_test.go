@@ -85,6 +85,24 @@ var _ = Describe("Driver", func() {
 			))
 		})
 
+		It("should validate an anti-affinity group ID without specifying a project", func() {
+			const groupID = "4b92e59d-bd20-4a8a-8d78-a154411c06cd"
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				Expect(r.Method).To(Equal(http.MethodGet))
+				Expect(r.URL.Path).To(Equal("/v1/anti-affinity-groups/" + groupID))
+				Expect(r.URL.Query()).NotTo(HaveKey("project"))
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			defer server.Close()
+
+			SUT.Host = server.URL
+			SUT.Token = "token"
+			SUT.Project = "project"
+			SUT.AntiAffinityGroups = []string{groupID}
+
+			Expect(SUT.PreCreateCheck()).To(Succeed())
+		})
+
 		It("should identify a missing anti-affinity group", func() {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "not found", http.StatusNotFound)
