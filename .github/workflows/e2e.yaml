@@ -35,6 +35,7 @@ jobs:
       RANCHER_E2E_STAGE_RKE2_TF_VAR_floating_ip_pool_id: 4a125719-9d1d-49e9-a2e4-042053a4716b # public
       RANCHER_E2E_STAGE_RANCHER_TF_VAR_rancher_password: ${{ secrets.RANCHER_PASSWORD }}
       RANCHER_E2E_STAGE_NODEDRIVER_TF_VAR_oxide_profile: e2e
+      RANCHER_E2E_STAGE_K8S_OXIDE_PROFILE: e2e
       RANCHER_E2E_STAGE_K8S_TF_VAR_ccm_oxide_profile: e2e
       RANCHER_E2E_STAGE_NODEDRIVER_TF_VAR_oxide_nodedriver_url: ${{ inputs.node_driver_url }}
       RANCHER_E2E_STAGE_NODEDRIVER_TF_VAR_oxide_nodedriver_checksum: ${{ inputs.node_driver_checksum }}
