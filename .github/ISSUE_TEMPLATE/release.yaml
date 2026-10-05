@@ -1,7 +1,7 @@
 name: Release
 description: Request a new release to be published.
 title: "Release: Rancher Machine Driver"
-projects: ["oxidecomputer/116"]
+labels: ["Rancher Node Driver", "Task"]
 body:
   - type: markdown
     attributes:
