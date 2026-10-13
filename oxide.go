@@ -39,6 +39,7 @@ const (
 	flagToken             = "oxide-token"
 	flagProject           = "oxide-project"
 	flagVCPUs             = "oxide-vcpus"
+	flagCPUPlatform       = "oxide-cpu-platform"
 	flagMemory            = "oxide-memory"
 	flagBootDiskSize      = "oxide-boot-disk-size"
 	flagBootDiskImageID   = "oxide-boot-disk-image-id"
@@ -76,6 +77,10 @@ type Driver struct {
 
 	// Number of vCPUs to give the instance.
 	VCPUS int
+
+	// CPU platform for the instance (e.g., amd_milan, amd_turin, amd_turin_v2).
+	// Empty means the instance requires no particular CPU platform.
+	CPUPlatform string
 
 	// Amount of memory, in bytes, to give the instance.
 	Memory uint64
@@ -269,6 +274,7 @@ func (d *Driver) Create() (err error) {
 			Memory:      oxide.ByteCount(d.Memory),
 			Name:        oxide.Name(d.GetMachineName()),
 			Ncpus:       oxide.InstanceCpuCount(d.VCPUS),
+			CpuPlatform: oxide.InstanceCpuPlatform(d.CPUPlatform),
 			NetworkInterfaces: oxide.InstanceNetworkInterfaceAttachment{
 				Value: &oxide.InstanceNetworkInterfaceAttachmentCreate{
 					Params: []oxide.InstanceNetworkInterfaceCreate{
@@ -417,6 +423,11 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			Value:  2,
 		},
 		mcnflag.StringFlag{
+			Name:   flagCPUPlatform,
+			Usage:  "CPU platform for the instance (e.g., amd_milan, amd_turin, amd_turin_v2). Empty means the instance requires no particular CPU platform.",
+			EnvVar: "OXIDE_CPU_PLATFORM",
+		},
+		mcnflag.StringFlag{
 			Name:   flagMemory,
 			Usage:  "Amount of memory, in bytes, to give the instance. Supports a unit suffix (e.g., 4 GiB).",
 			EnvVar: "OXIDE_MEMORY",
@@ -481,8 +492,8 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			EnvVar: "OXIDE_SSH_USER",
 		},
 		mcnflag.StringSliceFlag{
-			Name:   flagSSHPublicKey,
-			Usage:  "Existing Oxide SSH key names or IDs to inject into the instance. Do not provide OpenSSH public key material.",
+			Name:  flagSSHPublicKey,
+			Usage: "Existing Oxide SSH key names or IDs to inject into the instance. Do not provide OpenSSH public key material.",
 		},
 
 		// Anti-affinity groups.
@@ -763,6 +774,7 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 	d.Token = opts.String(flagToken)
 	d.Project = opts.String(flagProject)
 	d.VCPUS = opts.Int(flagVCPUs)
+	d.CPUPlatform = opts.String(flagCPUPlatform)
 	d.BootDiskImageID = opts.String(flagBootDiskImageID)
 	d.VPC = opts.String(flagVPC)
 	d.Subnet = opts.String(flagSubnet)
